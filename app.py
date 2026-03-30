@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any, TypedDict
 
 import numpy as np
 import pandas as pd
@@ -19,6 +20,33 @@ from src.churn_pipeline import (
 )
 
 TARGET_COLUMN = "churned"
+AUTH_USERNAME = "Admin123"
+AUTH_PASSWORD = "12345678"
+
+
+class ModelMetrics(TypedDict):
+    accuracy: float
+    precision: float
+    recall: float
+    f1: float
+    roc_auc: float
+    pr_auc: float
+
+
+class MetricsBundle(TypedDict):
+    logistic_regression: ModelMetrics
+    naive_bayes: ModelMetrics
+    xgboost: ModelMetrics
+    feature_names: list[str]
+    feature_columns: list[str]
+
+
+class AppAssets(TypedDict):
+    logistic_pipeline: Any
+    naive_bayes_pipeline: Any
+    xgb_pipeline: Any
+    metrics: MetricsBundle
+    xgb_explainer: Any
 
 st.set_page_config(
     page_title="Customer Churn Early Warning System",
@@ -28,7 +56,7 @@ st.set_page_config(
 
 
 @st.cache_resource
-def load_assets() -> dict[str, object]:
+def load_assets() -> AppAssets:
     logistic_pipeline = load_artifact(ARTIFACT_DIR / "logistic_pipeline.joblib")
     naive_bayes_pipeline = load_artifact(ARTIFACT_DIR / "naive_bayes_pipeline.joblib")
     xgb_pipeline = load_artifact(ARTIFACT_DIR / "xgb_pipeline.joblib")
@@ -69,10 +97,87 @@ def add_branding() -> None:
                 padding: 1rem 1rem 0.85rem;
                 box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
             }
+            .dashboard-note,
+            .dashboard-note p,
+            .dashboard-note li,
+            .dashboard-note span {
+                color: #e5e7eb;
+            }
         </style>
         """,
         unsafe_allow_html=True,
     )
+
+
+def init_auth_state() -> None:
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
+    if "auth_error" not in st.session_state:
+        st.session_state.auth_error = ""
+
+
+def authenticate_user(username: str, password: str) -> bool:
+    return username == AUTH_USERNAME and password == AUTH_PASSWORD
+
+
+def render_login_page() -> None:
+    st.markdown(
+        """
+        <style>
+            .login-title {
+                font-size: 1.6rem;
+                font-weight: 700;
+                color: #f8fafc;
+                margin-bottom: 0.25rem;
+            }
+            .login-subtitle {
+                color: #cbd5e1;
+                margin-bottom: 1rem;
+            }
+            .login-caption {
+                color: #cbd5e1;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    left, center, right = st.columns([1, 1.5, 1])
+    with center:
+        st.markdown('<div class="login-title">Login to Dashboard</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="login-subtitle">Masukkan username dan password yang valid untuk membuka dashboard analisis churn.</div>',
+            unsafe_allow_html=True,
+        )
+        with st.form("login_form", clear_on_submit=False):
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Login", use_container_width=True)
+
+        if submitted:
+            if authenticate_user(username, password):
+                st.session_state.authenticated = True
+                st.session_state.auth_error = ""
+                st.rerun()
+            else:
+                st.session_state.auth_error = "Username atau password salah."
+
+        if st.session_state.auth_error:
+            st.error(st.session_state.auth_error)
+
+        st.markdown(
+            f'<div class="login-caption">Credential demo: username {AUTH_USERNAME} dan password {AUTH_PASSWORD}.</div>',
+            unsafe_allow_html=True,
+        )
+
+
+def render_logout_button() -> None:
+    st.sidebar.markdown("### Session")
+    st.sidebar.success(f"Logged in as {AUTH_USERNAME}")
+    if st.sidebar.button("Logout", use_container_width=True):
+        st.session_state.authenticated = False
+        st.session_state.auth_error = ""
+        st.rerun()
 
 
 def filter_data(frame: pd.DataFrame) -> pd.DataFrame:
@@ -197,7 +302,7 @@ def plot_top_risks(scored: pd.DataFrame) -> None:
     st.plotly_chart(fig, use_container_width=True)
 
 
-def show_model_comparison(metrics: dict[str, object]) -> None:
+def show_model_comparison(metrics: MetricsBundle) -> None:
     comparison = pd.DataFrame(
         [
             {"model": "Logistic Regression", **metrics["logistic_regression"]},
@@ -237,7 +342,7 @@ def derive_actions(scored: pd.DataFrame) -> list[str]:
     return actions
 
 
-def build_report_markdown(scored: pd.DataFrame, assets: dict[str, object], model_name: str, threshold: float) -> str:
+def build_report_markdown(scored: pd.DataFrame, assets: AppAssets, model_name: str, threshold: float) -> str:
     metrics_key = {
         "XGBoost": "xgboost",
         "Logistic Regression": "logistic_regression",
@@ -388,7 +493,15 @@ def recommendation_text(scored: pd.DataFrame) -> str:
 
 
 def main() -> None:
+    init_auth_state()
     add_branding()
+
+    if not st.session_state.authenticated:
+        render_login_page()
+        return
+
+    render_logout_button()
+
     assets = load_assets()
     data = load_source_data()
 
@@ -420,7 +533,10 @@ def main() -> None:
     pipeline = assets[pipeline_key]
     scored = score_frame(pipeline, filtered, threshold)
 
-    st.caption("Sistem klasifikasi: 80% data dipakai untuk training dan 20% untuk testing. Kolom churned adalah label aktual, bukan input model.")
+    st.markdown(
+        '<div class="dashboard-note">Sistem klasifikasi: 80% data dipakai untuk training dan 20% untuk testing. Kolom churned adalah label aktual, bukan input model.</div>',
+        unsafe_allow_html=True,
+    )
 
     kpi_cards(scored, threshold)
 
@@ -492,9 +608,9 @@ def main() -> None:
         "- Jika `match_flag` = Cocok, prediksi model sama dengan label aktual."
     )
 
-    st.info(
-        "Filter di dashboard ini dipakai untuk memilih subset pelanggan yang ingin dianalisis. "
-        "Filter tersebut bukan bagian dari proses training model."
+    st.markdown(
+        '<div class="dashboard-note">Filter di dashboard ini dipakai untuk memilih subset pelanggan yang ingin dianalisis. Filter tersebut bukan bagian dari proses training model.</div>',
+        unsafe_allow_html=True,
     )
 
     if selected_model_name == "XGBoost":
