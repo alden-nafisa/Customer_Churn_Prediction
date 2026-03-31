@@ -75,6 +75,10 @@ def main() -> None:
             "numeric": numeric_features,
             "categorical": categorical_features,
         },
+        "training_strategy": {
+            "split": "stratified_80_20",
+            "resampling": "SMOTE_on_training_only",
+        },
     }
     (ARTIFACT_DIR / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
 

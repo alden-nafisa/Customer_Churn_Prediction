@@ -518,7 +518,7 @@ def main() -> None:
     st.sidebar.header("Scoring Settings")
     selected_model_name = st.sidebar.radio("Scoring model", ["XGBoost", "Logistic Regression", "Naive Bayes"], index=0)
     threshold = st.sidebar.slider("Risk threshold", min_value=0.10, max_value=0.90, value=0.50, step=0.05)
-    st.sidebar.caption("Label churn historis dipakai hanya sebagai ground truth. Model memprediksi tanpa melihat kolom churned.")
+    st.sidebar.caption("Label churn historis dipakai hanya sebagai ground truth. Model memprediksi tanpa melihat kolom churned. Training memakai split stratified 80/20 dan SMOTE di data training.")
 
     filtered = filter_data(data)
     if filtered.empty:
@@ -534,7 +534,7 @@ def main() -> None:
     scored = score_frame(pipeline, filtered, threshold)
 
     st.markdown(
-        '<div class="dashboard-note">Sistem klasifikasi: 80% data dipakai untuk training dan 20% untuk testing. Kolom churned adalah label aktual, bukan input model.</div>',
+        '<div class="dashboard-note">Sistem klasifikasi: 80% data dipakai untuk training dan 20% untuk testing. SMOTE diterapkan pada data training. Kolom churned adalah label aktual, bukan input model.</div>',
         unsafe_allow_html=True,
     )
 

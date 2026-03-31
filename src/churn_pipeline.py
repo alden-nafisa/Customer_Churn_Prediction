@@ -7,6 +7,8 @@ import joblib
 import numpy as np
 import pandas as pd
 import shap
+from imblearn.over_sampling import SMOTE
+from imblearn.pipeline import Pipeline as ImbPipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
@@ -21,7 +23,7 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 from sklearn.model_selection import train_test_split
-from sklearn.pipeline import Pipeline
+from sklearn.pipeline import Pipeline as SkPipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from xgboost import XGBClassifier
 
@@ -67,63 +69,70 @@ def make_preprocessor(
 
     return ColumnTransformer(
         transformers=[
-            ("num", Pipeline(steps=numeric_steps), numeric_features),
-            ("cat", Pipeline(steps=categorical_steps), categorical_features),
+            ("num", SkPipeline(steps=numeric_steps), numeric_features),
+            ("cat", SkPipeline(steps=categorical_steps), categorical_features),
         ],
         remainder="drop",
         verbose_feature_names_out=True,
     )
 
 
-def build_logistic_pipeline(numeric_features: list[str], categorical_features: list[str]) -> Pipeline:
-    return Pipeline(
-        steps=[
-            ("preprocessor", make_preprocessor(numeric_features, categorical_features, scale_numeric=True)),
-            (
-                "model",
-                LogisticRegression(
-                    max_iter=4000,
-                    random_state=RANDOM_STATE,
-                ),
-            ),
-        ]
+def build_imbalance_aware_pipeline(
+    numeric_features: list[str],
+    categorical_features: list[str],
+    scale_numeric: bool,
+    model: Any,
+    use_smote: bool = True,
+) -> ImbPipeline:
+    steps: list[tuple[str, Any]] = [
+        ("preprocessor", make_preprocessor(numeric_features, categorical_features, scale_numeric=scale_numeric)),
+    ]
+    if use_smote:
+        steps.append(("smote", SMOTE(random_state=RANDOM_STATE)))
+    steps.append(("model", model))
+    return ImbPipeline(steps=steps)
+
+
+def build_logistic_pipeline(numeric_features: list[str], categorical_features: list[str]) -> ImbPipeline:
+    return build_imbalance_aware_pipeline(
+        numeric_features,
+        categorical_features,
+        scale_numeric=True,
+        model=LogisticRegression(
+            max_iter=4000,
+            random_state=RANDOM_STATE,
+        ),
     )
 
 
-def build_xgb_pipeline(numeric_features: list[str], categorical_features: list[str]) -> Pipeline:
-    return Pipeline(
-        steps=[
-            ("preprocessor", make_preprocessor(numeric_features, categorical_features, scale_numeric=False)),
-            (
-                "model",
-                XGBClassifier(
-                    n_estimators=300,
-                    learning_rate=0.05,
-                    max_depth=4,
-                    subsample=0.9,
-                    colsample_bytree=0.9,
-                    min_child_weight=1,
-                    reg_alpha=0.0,
-                    reg_lambda=1.0,
-                    random_state=RANDOM_STATE,
-                    n_jobs=-1,
-                    eval_metric="logloss",
-                    tree_method="hist",
-                ),
-            ),
-        ]
+def build_xgb_pipeline(numeric_features: list[str], categorical_features: list[str]) -> ImbPipeline:
+    return build_imbalance_aware_pipeline(
+        numeric_features,
+        categorical_features,
+        scale_numeric=False,
+        model=XGBClassifier(
+            n_estimators=300,
+            learning_rate=0.05,
+            max_depth=4,
+            subsample=0.9,
+            colsample_bytree=0.9,
+            min_child_weight=1,
+            reg_alpha=0.0,
+            reg_lambda=1.0,
+            random_state=RANDOM_STATE,
+            n_jobs=-1,
+            eval_metric="logloss",
+            tree_method="hist",
+        ),
     )
 
 
-def build_naive_bayes_pipeline(numeric_features: list[str], categorical_features: list[str]) -> Pipeline:
-    return Pipeline(
-        steps=[
-            ("preprocessor", make_preprocessor(numeric_features, categorical_features, scale_numeric=False)),
-            (
-                "model",
-                GaussianNB(var_smoothing=1e-9),
-            ),
-        ]
+def build_naive_bayes_pipeline(numeric_features: list[str], categorical_features: list[str]) -> ImbPipeline:
+    return build_imbalance_aware_pipeline(
+        numeric_features,
+        categorical_features,
+        scale_numeric=False,
+        model=GaussianNB(var_smoothing=1e-9),
     )
 
 
@@ -140,7 +149,7 @@ def train_test_data(
     )
 
 
-def evaluate_model(model: Pipeline, x_test: pd.DataFrame, y_test: pd.Series) -> dict[str, Any]:
+def evaluate_model(model: ImbPipeline, x_test: pd.DataFrame, y_test: pd.Series) -> dict[str, Any]:
     predicted = model.predict(x_test)
     probability = model.predict_proba(x_test)[:, 1]
 
@@ -155,23 +164,23 @@ def evaluate_model(model: Pipeline, x_test: pd.DataFrame, y_test: pd.Series) -> 
     }
 
 
-def transform_features(model: Pipeline, features: pd.DataFrame) -> np.ndarray:
+def transform_features(model: ImbPipeline, features: pd.DataFrame) -> np.ndarray:
     transformed = model.named_steps["preprocessor"].transform(features)
     if hasattr(transformed, "toarray"):
         transformed = transformed.toarray()
     return np.asarray(transformed)
 
 
-def get_feature_names(model: Pipeline) -> list[str]:
+def get_feature_names(model: ImbPipeline) -> list[str]:
     preprocessor = model.named_steps["preprocessor"]
     return preprocessor.get_feature_names_out().tolist()
 
 
-def build_shap_explainer(model: Pipeline) -> shap.TreeExplainer:
+def build_shap_explainer(model: ImbPipeline) -> shap.TreeExplainer:
     return shap.TreeExplainer(model.named_steps["model"])
 
 
-def predict_frame(model: Pipeline, frame: pd.DataFrame, threshold: float = 0.5) -> pd.DataFrame:
+def predict_frame(model: ImbPipeline, frame: pd.DataFrame, threshold: float = 0.5) -> pd.DataFrame:
     result = frame.copy()
     probabilities = model.predict_proba(frame)[:, 1]
     result["churn_probability"] = probabilities

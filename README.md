@@ -8,10 +8,32 @@ Proyek ini membangun sistem peringatan dini churn pelanggan untuk perusahaan Saa
 - **Explainability:** SHAP
 - **Dashboard:** Streamlit
 
+## Metode yang dipakai
+
+### Machine learning untuk churn prediction
+- Logistic Regression
+- Naive Bayes
+- XGBoost
+
+### Data mining
+- K-Means dipakai untuk segmentasi pelanggan, bukan untuk prediksi churn.
+
+### NLP
+- Sentiment analysis cocok memakai Naive Bayes sebagai baseline.
+- Summarization tidak menggunakan Naive Bayes sebagai algoritma utama.
+- Dataset live chat YouTube disiapkan sebagai sumber awal untuk eksperimen NLP.
+
+### Imbalance handling dan explainability
+- SMOTE dipakai pada data training churn yang imbalance.
+- SHAP/XAI dipakai untuk menjelaskan kenapa pelanggan diprediksi churn.
+
 ## Struktur
 
 - `customers_dataset.csv` — data pelanggan historis
+- `youtube_chat_5_menit.csv` — dataset komentar live chat untuk eksperimen NLP
 - `train_model.py` — melatih model dan menyimpan artefak
+- `train_customer_segmentation.py` — segmentasi pelanggan dengan K-Means
+- `train_sentiment_model.py` — melatih model sentiment analysis untuk komentar live chat
 - `app.py` — dashboard interaktif
 - `src/churn_pipeline.py` — utilitas pemodelan
 - `artifacts/` — model, metrik, dan output evaluasi
@@ -38,6 +60,32 @@ Artefak akan disimpan ke folder `artifacts/`:
 - `metrics.json`
 - `test_predictions.csv`
 
+### Melatih model NLP sentiment analysis
+
+```bash
+python train_sentiment_model.py
+```
+
+Artefak NLP akan disimpan ke folder `artifacts/nlp/`:
+
+- `logistic_sentiment_pipeline.pkl`
+- `naive_bayes_sentiment_pipeline.pkl`
+- `sentiment_metrics.json`
+- `sentiment_test_predictions.csv`
+
+### Melatih segmentasi pelanggan
+
+```bash
+python train_customer_segmentation.py
+```
+
+Artefak segmentasi akan disimpan ke folder `artifacts/segmentation/`:
+
+- `customer_segmentation_pipeline.joblib`
+- `customer_clusters.csv`
+- `cluster_summary.csv`
+- `segmentation_metrics.json`
+
 ## Bagaimana proses klasifikasi bekerja
 
 1. Data historis dibagi menjadi fitur dan label.
@@ -47,7 +95,8 @@ Artefak akan disimpan ke folder `artifacts/`:
 3. Model hanya melihat fitur pelanggan, bukan kolom `churned`.
 4. Data dibagi menjadi **80% training** dan **20% testing** secara stratified.
 5. Logistic Regression dan Naive Bayes dipakai sebagai baseline, lalu XGBoost sebagai model utama.
-6. Hasil prediksi berupa probabilitas churn dan label prediksi berdasarkan threshold.
+6. SMOTE diterapkan pada data training untuk membantu menangani kelas yang tidak seimbang.
+7. Hasil prediksi berupa probabilitas churn dan label prediksi berdasarkan threshold.
 
 ## Tentang filter dashboard
 
