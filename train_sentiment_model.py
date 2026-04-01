@@ -22,12 +22,66 @@ from sklearn.naive_bayes import MultinomialNB
 from sklearn.pipeline import Pipeline
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-DATA_PATH = PROJECT_ROOT / "youtube_chat_5_menit.csv"
+DATA_PATH = PROJECT_ROOT / "youtube_chat_5_menit_cleaned.csv"
 ARTIFACT_DIR = PROJECT_ROOT / "artifacts" / "nlp"
 TEXT_COLUMN = "message"
-TARGET_COLUMN = "sentiment"
 RANDOM_STATE = 42
 TEST_SIZE = 0.2
+
+POSITIVE_LEXICON = {
+    "good",
+    "great",
+    "nice",
+    "awesome",
+    "amazing",
+    "mantap",
+    "keren",
+    "bagus",
+    "hebat",
+    "pintar",
+    "pinter",
+    "semangat",
+    "gass",
+    "gas",
+    "lets",
+    "let",
+    "go",
+    "gooo",
+    "goooo",
+    "suka",
+    "senang",
+    "terbaik",
+    "love",
+    "sukses",
+    "juara",
+    "mantul",
+    "ok",
+    "oke",
+}
+
+NEGATIVE_LEXICON = {
+    "bad",
+    "worse",
+    "worst",
+    "jelek",
+    "buruk",
+    "gagal",
+    "sedih",
+    "marah",
+    "bosan",
+    "lelah",
+    "capek",
+    "parah",
+    "anjir",
+    "nggak",
+    "ga",
+    "gak",
+    "tidak",
+    "kurang",
+    "benci",
+    "susah",
+    "ribet",
+}
 
 
 def clean_text(text: object) -> str:
@@ -47,20 +101,40 @@ def clean_text(text: object) -> str:
 
 def load_dataset(path: Path = DATA_PATH) -> pd.DataFrame:
     frame = pd.read_csv(path)
-    required = {TEXT_COLUMN, TARGET_COLUMN}
-    missing = required.difference(frame.columns)
-    if missing:
-        raise ValueError(f"Dataset is missing required columns: {sorted(missing)}")
-    return frame[[TEXT_COLUMN, TARGET_COLUMN]].dropna().copy()
+    if TEXT_COLUMN not in frame.columns:
+        raise ValueError(f"Dataset is missing required column: {TEXT_COLUMN}")
+    return frame[[TEXT_COLUMN]].dropna().copy()
+
+
+def infer_sentiment_label(text: object) -> str:
+    cleaned = clean_text(text)
+    if not cleaned:
+        return "Neutral"
+
+    tokens = cleaned.split()
+    positive_hits = sum(token in POSITIVE_LEXICON for token in tokens)
+    negative_hits = sum(token in NEGATIVE_LEXICON for token in tokens)
+
+    if positive_hits > negative_hits:
+        return "Positive"
+    if negative_hits > positive_hits:
+        return "Negative"
+    return "Neutral"
+
+
+def build_label_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    labeled = frame.copy()
+    labeled["sentiment_label"] = labeled[TEXT_COLUMN].map(infer_sentiment_label)
+    return labeled
 
 
 def train_test_data(frame: pd.DataFrame) -> tuple[pd.Series, pd.Series, pd.Series, pd.Series]:
     x_train, x_test, y_train, y_test = train_test_split(
         frame[TEXT_COLUMN],
-        frame[TARGET_COLUMN],
+        frame["sentiment_label"],
         test_size=TEST_SIZE,
         random_state=RANDOM_STATE,
-        stratify=frame[TARGET_COLUMN],
+        stratify=frame["sentiment_label"],
     )
     return x_train, x_test, y_train, y_test
 
@@ -126,15 +200,16 @@ def save_artifact(obj: object, path: Path) -> Path:
 
 def main() -> None:
     dataset = load_dataset()
-    x_train, x_test, y_train, y_test = train_test_data(dataset)
+    labeled_dataset = build_label_frame(dataset)
+    x_train, x_test, y_train, y_test = train_test_data(labeled_dataset)
 
     logistic_pipeline = build_logistic_pipeline()
     naive_bayes_pipeline = build_naive_bayes_pipeline()
 
-    print("Training Logistic Regression sentiment baseline...")
+    print("Training Logistic Regression sentiment model from cleaned comments...")
     logistic_pipeline.fit(x_train, y_train)
 
-    print("Training Naive Bayes sentiment baseline...")
+    print("Training Naive Bayes sentiment model from cleaned comments...")
     naive_bayes_pipeline.fit(x_train, y_train)
 
     logistic_metrics = evaluate_model(logistic_pipeline, x_test, y_test)
@@ -147,7 +222,7 @@ def main() -> None:
     test_predictions = pd.DataFrame(
         {
             "message": x_test.values,
-            "actual_sentiment": y_test.values,
+            "pseudo_sentiment": y_test.values,
             "logistic_prediction": logistic_pipeline.predict(x_test),
             "naive_bayes_prediction": naive_bayes_pipeline.predict(x_test),
         }
@@ -157,10 +232,16 @@ def main() -> None:
     metrics = {
         "logistic_regression": logistic_metrics,
         "naive_bayes": naive_bayes_metrics,
+        "label_strategy": {
+            "source": "comment_text_only",
+            "sentiment_column_used": False,
+            "label_method": "lexicon_based_weak_supervision",
+            "label_column": "sentiment_label",
+            "dataset": DATA_PATH.name,
+        },
         "training_strategy": {
             "split": "stratified_80_20",
             "text_features": "tfidf_ngrams_1_2",
-            "label_column": TARGET_COLUMN,
         },
     }
     (ARTIFACT_DIR / "sentiment_metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")

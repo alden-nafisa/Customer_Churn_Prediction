@@ -3,7 +3,6 @@
 Proyek ini membangun sistem peringatan dini churn pelanggan untuk perusahaan SaaS dengan:
 
 - **Baseline model:** Logistic Regression
-- **Baseline model tambahan:** Naive Bayes
 - **Main model:** XGBoost
 - **Explainability:** SHAP
 - **Dashboard:** Streamlit
@@ -12,16 +11,15 @@ Proyek ini membangun sistem peringatan dini churn pelanggan untuk perusahaan Saa
 
 ### Machine learning untuk churn prediction
 - Logistic Regression
-- Naive Bayes
 - XGBoost
 
 ### Data mining
 - K-Means dipakai untuk segmentasi pelanggan, bukan untuk prediksi churn.
 
 ### NLP
-- Sentiment analysis cocok memakai Naive Bayes sebagai baseline.
-- Summarization tidak menggunakan Naive Bayes sebagai algoritma utama.
-- Dataset live chat YouTube disiapkan sebagai sumber awal untuk eksperimen NLP.
+- Sentiment analysis memakai komentar sebagai input dan label sentimen dibentuk otomatis dari teks.
+- Session summary dibuat sebagai ringkasan extractive berbasis komentar.
+- Dataset live chat YouTube yang sudah dirapikan dipakai untuk eksperimen NLP.
 
 ### Imbalance handling dan explainability
 - SMOTE dipakai pada data training churn yang imbalance.
@@ -30,7 +28,7 @@ Proyek ini membangun sistem peringatan dini churn pelanggan untuk perusahaan Saa
 ## Struktur
 
 - `customers_dataset_tidied.xlsx` — data pelanggan historis yang lebih rapi
-- `youtube_chat_5_menit.csv` — dataset komentar live chat untuk eksperimen NLP
+- `youtube_chat_5_menit_cleaned.csv` — dataset komentar live chat yang sudah dirapikan untuk eksperimen NLP
 - `train_model.py` — melatih model dan menyimpan artefak
 - `train_customer_segmentation.py` — segmentasi pelanggan dengan K-Means
 - `train_sentiment_model.py` — melatih model sentiment analysis untuk komentar live chat
@@ -55,7 +53,6 @@ python train_model.py
 Artefak akan disimpan ke folder `artifacts/`:
 
 - `logistic_pipeline.joblib`
-- `naive_bayes_pipeline.joblib`
 - `xgb_pipeline.joblib`
 - `metrics.json`
 - `test_predictions.csv`
@@ -72,6 +69,19 @@ Artefak NLP akan disimpan ke folder `artifacts/nlp/`:
 - `naive_bayes_sentiment_pipeline.pkl`
 - `sentiment_metrics.json`
 - `sentiment_test_predictions.csv`
+
+Script ini memakai teks komentar saja dan tidak menjadikan kolom sentiment sebagai input sistem.
+
+### Membuat session summary
+
+```bash
+python train_session_summary.py
+```
+
+Ringkasan komentar akan disimpan ke `artifacts/nlp/`:
+
+- `session_summary.json`
+- `session_summary.txt`
 
 ### Melatih segmentasi pelanggan
 
@@ -94,7 +104,7 @@ Artefak segmentasi akan disimpan ke folder `artifacts/segmentation/`:
 	- `0` = pelanggan tidak churn
 3. Model hanya melihat fitur pelanggan, bukan kolom `churned`.
 4. Data dibagi menjadi **80% training** dan **20% testing** secara stratified.
-5. Logistic Regression dan Naive Bayes dipakai sebagai baseline, lalu XGBoost sebagai model utama.
+5. Logistic Regression dipakai sebagai baseline, lalu XGBoost sebagai model utama.
 6. SMOTE diterapkan pada data training untuk membantu menangani kelas yang tidak seimbang.
 7. Hasil prediksi berupa probabilitas churn dan label prediksi berdasarkan threshold.
 
@@ -107,13 +117,12 @@ Filter di dashboard dipakai untuk memilih subset pelanggan yang ingin dianalisis
 
 Jadi filter itu **bukan bagian dari training model**, melainkan untuk memudahkan analisis bisnis.
 
-## Report generator
+## Penjelasan risiko
 
-Dashboard menyediakan file report yang bisa diunduh, berisi:
+Dashboard menyediakan penjelasan ringkas yang bisa diunduh sebagai CSV, berisi:
 
-- ringkasan performa model,
-- jumlah pelanggan churn aktual vs prediksi,
-- daftar pelanggan prioritas,
+- skor risiko tiap pelanggan,
+- faktor pendorong utama,
 - rekomendasi tindakan retensi.
 
 ## Menjalankan dashboard
@@ -126,6 +135,7 @@ streamlit run app.py
 
 - Filter pelanggan berdasarkan plan, kontrak, tenure, revenue, login, dan NPS
 - Peringkat pelanggan dengan risiko churn tertinggi
-- Perbandingan performa Logistic Regression vs Naive Bayes vs XGBoost
+- Perbandingan performa Logistic Regression vs XGBoost
+- Ringkasan SHAP global dan alasan per pelanggan
 - Penjelasan global dan lokal berbasis SHAP
-- Download report analitik
+- Download explanation CSV

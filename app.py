@@ -35,7 +35,6 @@ class ModelMetrics(TypedDict):
 
 class MetricsBundle(TypedDict):
     logistic_regression: ModelMetrics
-    naive_bayes: ModelMetrics
     xgboost: ModelMetrics
     feature_names: list[str]
     selected_features: list[str]
@@ -44,7 +43,6 @@ class MetricsBundle(TypedDict):
 
 class AppAssets(TypedDict):
     logistic_pipeline: Any
-    naive_bayes_pipeline: Any
     xgb_pipeline: Any
     metrics: MetricsBundle
     xgb_explainer: Any
@@ -60,12 +58,10 @@ st.set_page_config(
 @st.cache_resource
 def load_assets() -> AppAssets:
     logistic_pipeline = load_artifact(ARTIFACT_DIR / "logistic_pipeline.joblib")
-    naive_bayes_pipeline = load_artifact(ARTIFACT_DIR / "naive_bayes_pipeline.joblib")
     xgb_pipeline = load_artifact(ARTIFACT_DIR / "xgb_pipeline.joblib")
     metrics = json.loads((ARTIFACT_DIR / "metrics.json").read_text(encoding="utf-8"))
     return {
         "logistic_pipeline": logistic_pipeline,
-        "naive_bayes_pipeline": naive_bayes_pipeline,
         "xgb_pipeline": xgb_pipeline,
         "metrics": metrics,
         "xgb_explainer": shap.TreeExplainer(xgb_pipeline.named_steps["model"]),
@@ -311,7 +307,6 @@ def show_model_comparison(metrics: MetricsBundle) -> None:
     comparison = pd.DataFrame(
         [
             {"model": "Logistic Regression", **metrics["logistic_regression"]},
-            {"model": "Naive Bayes", **metrics["naive_bayes"]},
             {"model": "XGBoost", **metrics["xgboost"]},
         ]
     )
@@ -347,11 +342,71 @@ def derive_actions(scored: pd.DataFrame) -> list[str]:
     return actions
 
 
-def build_report_markdown(scored: pd.DataFrame, assets: AppAssets, model_name: str, threshold: float) -> str:
+def recommend_action_for_row(row: pd.Series, top_driver: str, medians: pd.Series) -> str:
+    driver = str(top_driver).lower()
+
+    if "payment_delay" in driver or row["payment_delay_count"] >= medians.get("payment_delay_count", row["payment_delay_count"]):
+        return "Prioritaskan follow-up penagihan dan tawarkan opsi pembayaran yang lebih fleksibel."
+    if "support_tickets" in driver or row["support_tickets_last_90d"] >= medians.get("support_tickets_last_90d", row["support_tickets_last_90d"]):
+        return "Lakukan eskalasi support dan periksa akar masalah yang berulang."
+    if "last_login" in driver or row["last_login_days_ago"] >= medians.get("last_login_days_ago", row["last_login_days_ago"]):
+        return "Jalankan re-engagement untuk pelanggan yang mulai jarang login."
+    if "feature_adoption" in driver or row["feature_adoption_pct"] <= medians.get("feature_adoption_pct", row["feature_adoption_pct"]):
+        return "Berikan onboarding lanjutan dan edukasi fitur untuk meningkatkan adopsi produk."
+    if "nps" in driver or row["nps_score"] <= medians.get("nps_score", row["nps_score"]):
+        return "Tindak lanjuti melalui survey dan outreach Customer Success untuk memahami sentimen pelanggan."
+
+    return "Lakukan outreach Customer Success personal dan sesuaikan intervensi dengan segmen pelanggan."
+
+
+def build_shap_summary(scored: pd.DataFrame, xgb_pipeline, explainer, selected_features: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    if scored.empty:
+        empty_global = pd.DataFrame(columns=["feature", "mean_abs_shap"])
+        empty_export = pd.DataFrame(columns=[ID_COLUMN, "churn_probability", "top_driver", "top_driver_shap", "recommended_action"])
+        return empty_global, empty_export
+
+    sample = scored.reset_index(drop=True).copy()
+    feature_frame = sample.drop(
+        columns=[ID_COLUMN, TARGET_COLUMN, "churn_probability", "risk_flag", "risk_rank", "actual_churn_label", "predicted_churn_label", "match_flag"],
+        errors="ignore",
+    )
+    if selected_features:
+        feature_frame = feature_frame[[column for column in selected_features if column in feature_frame.columns]].copy()
+
+    transformed = transform_features(xgb_pipeline, feature_frame)
+    explanation = explainer(transformed)
+    feature_names = xgb_pipeline.named_steps["preprocessor"].get_feature_names_out().tolist()
+
+    shap_values = explanation.values
+    mean_abs = np.abs(shap_values).mean(axis=0)
+    top_idx = np.argsort(mean_abs)[-10:][::-1]
+    global_df = pd.DataFrame(
+        {
+            "feature": [feature_names[i] for i in top_idx],
+            "mean_abs_shap": mean_abs[top_idx],
+        }
+    )
+
+    row_top_idx = np.abs(shap_values).argmax(axis=1)
+    row_top_values = shap_values[np.arange(len(sample)), row_top_idx]
+    top_driver_names = [feature_names[i] for i in row_top_idx]
+    medians = sample.median(numeric_only=True)
+
+    export_df = sample[[ID_COLUMN, "churn_probability", "actual_churn_label", "predicted_churn_label", "risk_flag"]].copy()
+    export_df["top_driver"] = top_driver_names
+    export_df["top_driver_shap"] = row_top_values
+    export_df["recommended_action"] = [
+        recommend_action_for_row(sample.iloc[idx], top_driver_names[idx], medians)
+        for idx in range(len(sample))
+    ]
+
+    return global_df, export_df
+
+
+def build_explanation_summary(scored: pd.DataFrame, assets: AppAssets, model_name: str, threshold: float) -> str:
     metrics_key = {
         "XGBoost": "xgboost",
         "Logistic Regression": "logistic_regression",
-        "Naive Bayes": "naive_bayes",
     }.get(model_name, "xgboost")
     model_metrics = assets["metrics"][metrics_key]
 
@@ -360,42 +415,16 @@ def build_report_markdown(scored: pd.DataFrame, assets: AppAssets, model_name: s
     high_risk = int((scored["risk_flag"] == "High Risk").sum())
     match_rate = float((scored["match_flag"] == "Cocok").mean()) if len(scored) else 0.0
 
-    top_rows = scored.head(10)[[
-        ID_COLUMN,
-        "plan_type",
-        "contract_type",
-        "actual_churn_label",
-        "predicted_churn_label",
-        "churn_probability",
-        "payment_delay_count",
-        "support_tickets_last_90d",
-        "last_login_days_ago",
-    ]].copy()
-
-    table_lines = [
-        "| Customer | Plan | Contract | Actual | Predicted | Probability | Payment Delay | Tickets | Last Login |",
-        "|---|---|---|---|---|---:|---:|---:|---:|",
-    ]
-    for _, row in top_rows.iterrows():
-        table_lines.append(
-            f"| {row[ID_COLUMN]} | {row['plan_type']} | {row['contract_type']} | {row['actual_churn_label']} | {row['predicted_churn_label']} | {row['churn_probability']:.2%} | {int(row['payment_delay_count'])} | {int(row['support_tickets_last_90d'])} | {int(row['last_login_days_ago'])} |"
-        )
-
-    actions = derive_actions(scored)
-    action_bullets = "\n".join(f"- {item}" for item in actions)
-
-    return f"""# Churn Report
-
-## Ringkasan
-- Model: {model_name}
+    return f"""### Ringkasan Risiko
+- Model aktif: {model_name}
 - Threshold risiko: {threshold:.2f}
-- Jumlah pelanggan pada view ini: {len(scored)}
-- Churn aktual pada view ini: {actual_churn}
+- Pelanggan dalam view saat ini: {len(scored)}
+- Churn aktual: {actual_churn}
 - Prediksi churn: {predicted_churn}
 - High risk: {high_risk}
-- Match rate prediksi vs label aktual: {match_rate:.2%}
+- Match rate: {match_rate:.2%}
 
-## Performa model pada test set (20%)
+### Performa Model pada Test Set (20%)
 - Accuracy: {model_metrics['accuracy']:.3f}
 - Precision: {model_metrics['precision']:.3f}
 - Recall: {model_metrics['recall']:.3f}
@@ -403,14 +432,8 @@ def build_report_markdown(scored: pd.DataFrame, assets: AppAssets, model_name: s
 - ROC AUC: {model_metrics['roc_auc']:.3f}
 - PR AUC: {model_metrics['pr_auc']:.3f}
 
-## Pelanggan prioritas
-{chr(10).join(table_lines)}
-
-## Rekomendasi tindakan
-{action_bullets}
-
-## Catatan proses klasifikasi
-Label churn aktual berasal dari kolom `churned` pada data historis. Model hanya menggunakan fitur pelanggan, bukan label tersebut, untuk memprediksi probabilitas churn.
+### Catatan
+Penjelasan di dashboard ini memakai SHAP untuk menunjukkan indikasi utama yang berkaitan dengan risiko churn, bukan klaim sebab-akibat langsung.
 """
 
 
@@ -421,21 +444,7 @@ def explain_with_shap(scored: pd.DataFrame, xgb_pipeline, explainer, selected_fe
 
     st.subheader("Explainable AI: pendorong churn")
     sample = scored.head(min(250, len(scored))).copy()
-    feature_frame = sample.drop(columns=[ID_COLUMN, TARGET_COLUMN, "churn_probability", "risk_flag", "risk_rank", "actual_churn_label", "predicted_churn_label", "match_flag"], errors="ignore")
-    if selected_features:
-        feature_frame = feature_frame[[column for column in selected_features if column in feature_frame.columns]].copy()
-    transformed = transform_features(xgb_pipeline, feature_frame)
-    explanation = explainer(transformed)
-    feature_names = xgb_pipeline.named_steps["preprocessor"].get_feature_names_out().tolist()
-
-    mean_abs = np.abs(explanation.values).mean(axis=0)
-    top_idx = np.argsort(mean_abs)[-10:][::-1]
-    importance_df = pd.DataFrame(
-        {
-            "feature": [feature_names[i] for i in top_idx],
-            "mean_abs_shap": mean_abs[top_idx],
-        }
-    )
+    importance_df, _ = build_shap_summary(sample, xgb_pipeline, explainer, selected_features)
 
     fig = px.bar(
         importance_df.sort_values("mean_abs_shap", ascending=True),
@@ -454,12 +463,13 @@ def explain_with_shap(scored: pd.DataFrame, xgb_pipeline, explainer, selected_fe
         options=scored[ID_COLUMN].tolist(),
         index=0,
     )
-    row = scored.loc[scored[ID_COLUMN] == selected_customer].head(1)
+    row = scored.loc[scored[ID_COLUMN] == selected_customer].head(1).copy().reset_index(drop=True)
     row_features = row.drop(columns=[ID_COLUMN, TARGET_COLUMN, "churn_probability", "risk_flag", "risk_rank", "actual_churn_label", "predicted_churn_label", "match_flag"], errors="ignore")
     if selected_features:
         row_features = row_features[[column for column in selected_features if column in row_features.columns]].copy()
     row_transformed = transform_features(xgb_pipeline, row_features)
     row_exp = explainer(row_transformed)
+    feature_names = xgb_pipeline.named_steps["preprocessor"].get_feature_names_out().tolist()
     row_values = row_exp.values[0]
     row_feature_df = pd.DataFrame(
         {
@@ -519,14 +529,14 @@ def main() -> None:
         """
         <div class="hero">
             <h1>Customer Churn Early Warning Dashboard</h1>
-            <p>Prediksi risiko churn, bandingkan Logistic Regression, Naive Bayes, dan XGBoost, lalu jelaskan alasan model dengan SHAP.</p>
+            <p>Prediksi risiko churn, bandingkan Logistic Regression dan XGBoost, lalu jelaskan alasan model dengan SHAP.</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
     st.sidebar.header("Scoring Settings")
-    selected_model_name = st.sidebar.radio("Scoring model", ["XGBoost", "Logistic Regression", "Naive Bayes"], index=0)
+    selected_model_name = st.sidebar.radio("Scoring model", ["XGBoost", "Logistic Regression"], index=0)
     threshold = st.sidebar.slider("Risk threshold", min_value=0.10, max_value=0.90, value=0.50, step=0.05)
     st.sidebar.caption("Label churn historis dipakai hanya sebagai ground truth. Model memprediksi tanpa melihat kolom churned. Training memakai split stratified 80/20 dan SMOTE di data training.")
     if selected_features:
@@ -541,14 +551,37 @@ def main() -> None:
     pipeline_key = {
         "XGBoost": "xgb_pipeline",
         "Logistic Regression": "logistic_pipeline",
-        "Naive Bayes": "naive_bayes_pipeline",
     }[selected_model_name]
     pipeline = assets[pipeline_key]
     scored = score_frame(pipeline, filtered, threshold, selected_features)
+    global_shap_df, explanation_export = build_shap_summary(
+        scored,
+        assets["xgb_pipeline"],
+        assets["xgb_explainer"],
+        selected_features,
+    )
 
     st.markdown(
         '<div class="dashboard-note">Sistem klasifikasi: 80% data dipakai untuk training dan 20% untuk testing. SMOTE diterapkan pada data training. Kolom churned adalah label aktual, bukan input model.</div>',
         unsafe_allow_html=True,
+    )
+
+    st.subheader("Penjelasan Risiko")
+    st.markdown(build_explanation_summary(scored, assets, selected_model_name, threshold))
+
+    if not global_shap_df.empty:
+        st.caption("Faktor global yang paling sering mendorong churn pada view ini")
+        st.dataframe(
+            global_shap_df.style.format({"mean_abs_shap": "{:.4f}"}),
+            use_container_width=True,
+            height=260,
+        )
+
+    st.download_button(
+        label="Download explanation CSV",
+        data=explanation_export.to_csv(index=False).encode("utf-8"),
+        file_name="churn_explanation_summary.csv",
+        mime="text/csv",
     )
 
     if selected_features:
@@ -611,14 +644,6 @@ def main() -> None:
         mime="text/csv",
     )
 
-    report_md = build_report_markdown(scored, assets, selected_model_name, threshold)
-    st.download_button(
-        label="Download report",
-        data=report_md.encode("utf-8"),
-        file_name="churn_report.md",
-        mime="text/markdown",
-    )
-
     show_model_comparison(assets["metrics"])
 
     st.subheader("Ringkasan klasifikasi")
@@ -641,9 +666,6 @@ def main() -> None:
 
     st.subheader("Retained action suggestion")
     st.success(recommendation_text(scored))
-
-    with st.expander("Lihat contoh report generator"):
-        st.markdown(report_md)
 
 
 if __name__ == "__main__":
