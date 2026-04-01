@@ -7,11 +7,13 @@ from pathlib import Path
 import pandas as pd
 from sklearn.inspection import permutation_importance
 from sklearn.model_selection import train_test_split
+from xgboost import XGBClassifier
 
 from src.churn_pipeline import (
     ARTIFACT_DIR,
     DATA_PATH,
     build_logistic_pipeline,
+    build_imbalance_aware_pipeline,
     build_naive_bayes_pipeline,
     build_xgb_pipeline,
     detect_feature_types,
@@ -25,6 +27,8 @@ from src.churn_pipeline import (
 
 FEATURE_SELECTION_COVERAGE = 0.90
 MIN_SELECTED_FEATURES = 5
+SELECTION_XGB_N_ESTIMATORS = 80
+SELECTION_PERMUTATION_REPEATS = 5
 
 
 def select_important_features(
@@ -38,7 +42,7 @@ def select_important_features(
         model,
         x_validation,
         y_validation,
-        n_repeats=10,
+        n_repeats=SELECTION_PERMUTATION_REPEATS,
         random_state=42,
         scoring="roc_auc",
         n_jobs=-1,
@@ -47,8 +51,8 @@ def select_important_features(
     ranking = pd.DataFrame(
         {
             "feature": x_validation.columns,
-            "importance_mean": importance.importances_mean,
-            "importance_std": importance.importances_std,
+            "importance_mean": importance["importances_mean"],
+            "importance_std": importance["importances_std"],
         }
     ).sort_values("importance_mean", ascending=False)
 
@@ -85,7 +89,25 @@ def main() -> None:
         stratify=y_train,
     )
 
-    selection_pipeline = build_xgb_pipeline(numeric_features, categorical_features)
+    selection_pipeline = build_imbalance_aware_pipeline(
+        numeric_features,
+        categorical_features,
+        scale_numeric=False,
+        model=XGBClassifier(
+            n_estimators=SELECTION_XGB_N_ESTIMATORS,
+            learning_rate=0.1,
+            max_depth=3,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            min_child_weight=1,
+            reg_alpha=0.0,
+            reg_lambda=1.0,
+            random_state=42,
+            n_jobs=-1,
+            eval_metric="logloss",
+            tree_method="hist",
+        ),
+    )
     print("Training feature-selection XGBoost model...")
     selection_pipeline.fit(x_train_selection, y_train_selection)
 

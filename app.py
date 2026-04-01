@@ -39,7 +39,7 @@ class MetricsBundle(TypedDict):
     xgboost: ModelMetrics
     feature_names: list[str]
     selected_features: list[str]
-    feature_columns: list[str]
+    feature_columns: dict[str, list[str]]
 
 
 class AppAssets(TypedDict):
