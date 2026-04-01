@@ -28,7 +28,7 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from xgboost import XGBClassifier
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DATA_PATH = PROJECT_ROOT / "customers_dataset.csv"
+DATA_PATH = PROJECT_ROOT / "customers_dataset_tidied.xlsx"
 ARTIFACT_DIR = PROJECT_ROOT / "artifacts"
 
 TARGET_COLUMN = "churned"
@@ -38,7 +38,10 @@ TEST_SIZE = 0.2
 
 
 def load_dataset(data_path: str | Path = DATA_PATH) -> pd.DataFrame:
-    return pd.read_csv(data_path)
+    path = Path(data_path)
+    if path.suffix.lower() in {".xlsx", ".xls"}:
+        return pd.read_excel(path)
+    return pd.read_csv(path)
 
 
 def split_features_target(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
@@ -140,13 +143,13 @@ def train_test_data(
     features: pd.DataFrame,
     target: pd.Series,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
-    return train_test_split(
+    return tuple(train_test_split(
         features,
         target,
         test_size=TEST_SIZE,
         random_state=RANDOM_STATE,
         stratify=target,
-    )
+    ))  # type: ignore[return-value]
 
 
 def evaluate_model(model: ImbPipeline, x_test: pd.DataFrame, y_test: pd.Series) -> dict[str, Any]:

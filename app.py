@@ -38,6 +38,7 @@ class MetricsBundle(TypedDict):
     naive_bayes: ModelMetrics
     xgboost: ModelMetrics
     feature_names: list[str]
+    selected_features: list[str]
     feature_columns: list[str]
 
 
@@ -47,6 +48,7 @@ class AppAssets(TypedDict):
     xgb_pipeline: Any
     metrics: MetricsBundle
     xgb_explainer: Any
+    selected_features: list[str]
 
 st.set_page_config(
     page_title="Customer Churn Early Warning System",
@@ -67,6 +69,7 @@ def load_assets() -> AppAssets:
         "xgb_pipeline": xgb_pipeline,
         "metrics": metrics,
         "xgb_explainer": shap.TreeExplainer(xgb_pipeline.named_steps["model"]),
+        "selected_features": metrics.get("selected_features", []),
     }
 
 
@@ -238,8 +241,10 @@ def filter_data(frame: pd.DataFrame) -> pd.DataFrame:
     return filtered
 
 
-def score_frame(pipeline, frame: pd.DataFrame, threshold: float) -> pd.DataFrame:
+def score_frame(pipeline, frame: pd.DataFrame, threshold: float, selected_features: list[str]) -> pd.DataFrame:
     feature_frame = frame.drop(columns=[ID_COLUMN, TARGET_COLUMN], errors="ignore")
+    if selected_features:
+        feature_frame = feature_frame[[column for column in selected_features if column in feature_frame.columns]].copy()
     scored = frame.copy()
     probabilities = pipeline.predict_proba(feature_frame)[:, 1]
     predicted = (probabilities >= threshold).astype(int)
@@ -409,7 +414,7 @@ Label churn aktual berasal dari kolom `churned` pada data historis. Model hanya 
 """
 
 
-def explain_with_shap(scored: pd.DataFrame, xgb_pipeline, explainer) -> None:
+def explain_with_shap(scored: pd.DataFrame, xgb_pipeline, explainer, selected_features: list[str]) -> None:
     if scored.empty:
         st.info("Tidak ada data untuk dijelaskan setelah filter diterapkan.")
         return
@@ -417,6 +422,8 @@ def explain_with_shap(scored: pd.DataFrame, xgb_pipeline, explainer) -> None:
     st.subheader("Explainable AI: pendorong churn")
     sample = scored.head(min(250, len(scored))).copy()
     feature_frame = sample.drop(columns=[ID_COLUMN, TARGET_COLUMN, "churn_probability", "risk_flag", "risk_rank", "actual_churn_label", "predicted_churn_label", "match_flag"], errors="ignore")
+    if selected_features:
+        feature_frame = feature_frame[[column for column in selected_features if column in feature_frame.columns]].copy()
     transformed = transform_features(xgb_pipeline, feature_frame)
     explanation = explainer(transformed)
     feature_names = xgb_pipeline.named_steps["preprocessor"].get_feature_names_out().tolist()
@@ -449,6 +456,8 @@ def explain_with_shap(scored: pd.DataFrame, xgb_pipeline, explainer) -> None:
     )
     row = scored.loc[scored[ID_COLUMN] == selected_customer].head(1)
     row_features = row.drop(columns=[ID_COLUMN, TARGET_COLUMN, "churn_probability", "risk_flag", "risk_rank", "actual_churn_label", "predicted_churn_label", "match_flag"], errors="ignore")
+    if selected_features:
+        row_features = row_features[[column for column in selected_features if column in row_features.columns]].copy()
     row_transformed = transform_features(xgb_pipeline, row_features)
     row_exp = explainer(row_transformed)
     row_values = row_exp.values[0]
@@ -504,6 +513,7 @@ def main() -> None:
 
     assets = load_assets()
     data = load_source_data()
+    selected_features = assets["selected_features"]
 
     st.markdown(
         """
@@ -519,6 +529,9 @@ def main() -> None:
     selected_model_name = st.sidebar.radio("Scoring model", ["XGBoost", "Logistic Regression", "Naive Bayes"], index=0)
     threshold = st.sidebar.slider("Risk threshold", min_value=0.10, max_value=0.90, value=0.50, step=0.05)
     st.sidebar.caption("Label churn historis dipakai hanya sebagai ground truth. Model memprediksi tanpa melihat kolom churned. Training memakai split stratified 80/20 dan SMOTE di data training.")
+    if selected_features:
+        st.sidebar.success(f"Auto-selected features: {len(selected_features)}")
+        st.sidebar.caption(", ".join(selected_features))
 
     filtered = filter_data(data)
     if filtered.empty:
@@ -531,12 +544,19 @@ def main() -> None:
         "Naive Bayes": "naive_bayes_pipeline",
     }[selected_model_name]
     pipeline = assets[pipeline_key]
-    scored = score_frame(pipeline, filtered, threshold)
+    scored = score_frame(pipeline, filtered, threshold, selected_features)
 
     st.markdown(
         '<div class="dashboard-note">Sistem klasifikasi: 80% data dipakai untuk training dan 20% untuk testing. SMOTE diterapkan pada data training. Kolom churned adalah label aktual, bukan input model.</div>',
         unsafe_allow_html=True,
     )
+
+    if selected_features:
+        st.subheader("Fitur yang dipilih otomatis")
+        st.write(
+            "Model ini tidak memakai pilihan manual admin. Fitur berikut dipilih otomatis dari hasil training dan akan dipakai konsisten oleh pipeline."
+        )
+        st.write(", ".join(selected_features))
 
     kpi_cards(scored, threshold)
 
@@ -614,10 +634,10 @@ def main() -> None:
     )
 
     if selected_model_name == "XGBoost":
-        explain_with_shap(scored, assets["xgb_pipeline"], assets["xgb_explainer"])
+        explain_with_shap(scored, assets["xgb_pipeline"], assets["xgb_explainer"], selected_features)
     else:
         st.info("Panel SHAP tetap menggunakan model XGBoost karena pendekatan XAI pada proyek ini berfokus pada tree-based model utama.")
-        explain_with_shap(scored, assets["xgb_pipeline"], assets["xgb_explainer"])
+        explain_with_shap(scored, assets["xgb_pipeline"], assets["xgb_explainer"], selected_features)
 
     st.subheader("Retained action suggestion")
     st.success(recommendation_text(scored))

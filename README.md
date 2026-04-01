@@ -29,7 +29,7 @@ Proyek ini membangun sistem peringatan dini churn pelanggan untuk perusahaan Saa
 
 ## Struktur
 
-- `customers_dataset.csv` — data pelanggan historis
+- `customers_dataset_tidied.xlsx` — data pelanggan historis yang lebih rapi
 - `youtube_chat_5_menit.csv` — dataset komentar live chat untuk eksperimen NLP
 - `train_model.py` — melatih model dan menyimpan artefak
 - `train_customer_segmentation.py` — segmentasi pelanggan dengan K-Means

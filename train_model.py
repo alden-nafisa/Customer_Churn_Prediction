@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+from math import ceil
 from pathlib import Path
 
 import pandas as pd
+from sklearn.inspection import permutation_importance
+from sklearn.model_selection import train_test_split
 
 from src.churn_pipeline import (
     ARTIFACT_DIR,
@@ -20,6 +23,52 @@ from src.churn_pipeline import (
     train_test_data,
 )
 
+FEATURE_SELECTION_COVERAGE = 0.90
+MIN_SELECTED_FEATURES = 5
+
+
+def select_important_features(
+    model,
+    x_validation: pd.DataFrame,
+    y_validation: pd.Series,
+    minimum_features: int = MIN_SELECTED_FEATURES,
+    coverage: float = FEATURE_SELECTION_COVERAGE,
+) -> list[str]:
+    importance = permutation_importance(
+        model,
+        x_validation,
+        y_validation,
+        n_repeats=10,
+        random_state=42,
+        scoring="roc_auc",
+        n_jobs=-1,
+    )
+
+    ranking = pd.DataFrame(
+        {
+            "feature": x_validation.columns,
+            "importance_mean": importance.importances_mean,
+            "importance_std": importance.importances_std,
+        }
+    ).sort_values("importance_mean", ascending=False)
+
+    ranking["importance_mean"] = ranking["importance_mean"].clip(lower=0.0)
+    total_importance = float(ranking["importance_mean"].sum())
+    if total_importance <= 0:
+        return ranking.head(max(minimum_features, 1))["feature"].tolist()
+
+    ranking["normalized_importance"] = ranking["importance_mean"] / total_importance
+    ranking["cumulative_importance"] = ranking["normalized_importance"].cumsum()
+
+    cutoff_index = ranking.index[ranking["cumulative_importance"] >= coverage]
+    if len(cutoff_index) == 0:
+        selected_count = max(minimum_features, ceil(len(ranking) * coverage))
+    else:
+        selected_count = max(minimum_features, int(cutoff_index[0]) + 1)
+
+    selected = ranking.head(selected_count)["feature"].tolist()
+    return selected
+
 
 def main() -> None:
     dataset = load_dataset(DATA_PATH)
@@ -28,9 +77,34 @@ def main() -> None:
 
     x_train, x_test, y_train, y_test = train_test_data(features, target)
 
-    logistic_pipeline = build_logistic_pipeline(numeric_features, categorical_features)
-    naive_bayes_pipeline = build_naive_bayes_pipeline(numeric_features, categorical_features)
-    xgb_pipeline = build_xgb_pipeline(numeric_features, categorical_features)
+    x_train_selection, x_selection, y_train_selection, y_selection = train_test_split(
+        x_train,
+        y_train,
+        test_size=0.25,
+        random_state=42,
+        stratify=y_train,
+    )
+
+    selection_pipeline = build_xgb_pipeline(numeric_features, categorical_features)
+    print("Training feature-selection XGBoost model...")
+    selection_pipeline.fit(x_train_selection, y_train_selection)
+
+    selected_features = select_important_features(selection_pipeline, x_selection, y_selection)
+    selected_numeric_features = [column for column in numeric_features if column in selected_features]
+    selected_categorical_features = [column for column in categorical_features if column in selected_features]
+
+    selected_importance_frame = pd.DataFrame(
+        {
+            "feature": x_selection.columns,
+            "selected": x_selection.columns.isin(selected_features),
+        }
+    )
+
+    print(f"Selected features ({len(selected_features)}): {selected_features}")
+
+    logistic_pipeline = build_logistic_pipeline(selected_numeric_features, selected_categorical_features)
+    naive_bayes_pipeline = build_naive_bayes_pipeline(selected_numeric_features, selected_categorical_features)
+    xgb_pipeline = build_xgb_pipeline(selected_numeric_features, selected_categorical_features)
 
     print("Training Logistic Regression baseline...")
     logistic_pipeline.fit(x_train, y_train)
@@ -71,16 +145,24 @@ def main() -> None:
         "naive_bayes": naive_bayes_metrics,
         "xgboost": xgb_metrics,
         "feature_names": feature_names,
+        "selected_features": selected_features,
         "feature_columns": {
-            "numeric": numeric_features,
-            "categorical": categorical_features,
+            "numeric": selected_numeric_features,
+            "categorical": selected_categorical_features,
         },
         "training_strategy": {
             "split": "stratified_80_20",
+            "feature_selection": {
+                "method": "permutation_importance_on_holdout",
+                "coverage": FEATURE_SELECTION_COVERAGE,
+                "minimum_features": MIN_SELECTED_FEATURES,
+                "validation_split": 0.25,
+            },
             "resampling": "SMOTE_on_training_only",
         },
     }
     (ARTIFACT_DIR / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+    selected_importance_frame.to_csv(ARTIFACT_DIR / "feature_selection_summary.csv", index=False)
 
     print("\n=== Model Comparison ===")
     for name, values in (
