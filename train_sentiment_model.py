@@ -139,30 +139,6 @@ def train_test_data(frame: pd.DataFrame) -> tuple[pd.Series, pd.Series, pd.Serie
     return x_train, x_test, y_train, y_test
 
 
-def build_logistic_pipeline() -> Pipeline:
-    return Pipeline(
-        steps=[
-            (
-                "tfidf",
-                TfidfVectorizer(
-                    preprocessor=clean_text,
-                    ngram_range=(1, 2),
-                    min_df=2,
-                    max_features=10000,
-                ),
-            ),
-            (
-                "model",
-                LogisticRegression(
-                    max_iter=4000,
-                    solver="lbfgs",
-                    random_state=RANDOM_STATE,
-                ),
-            ),
-        ]
-    )
-
-
 def build_naive_bayes_pipeline() -> Pipeline:
     return Pipeline(
         steps=[
@@ -203,34 +179,29 @@ def main() -> None:
     labeled_dataset = build_label_frame(dataset)
     x_train, x_test, y_train, y_test = train_test_data(labeled_dataset)
 
-    logistic_pipeline = build_logistic_pipeline()
     naive_bayes_pipeline = build_naive_bayes_pipeline()
-
-    print("Training Logistic Regression sentiment model from cleaned comments...")
-    logistic_pipeline.fit(x_train, y_train)
 
     print("Training Naive Bayes sentiment model from cleaned comments...")
     naive_bayes_pipeline.fit(x_train, y_train)
 
-    logistic_metrics = evaluate_model(logistic_pipeline, x_test, y_test)
     naive_bayes_metrics = evaluate_model(naive_bayes_pipeline, x_test, y_test)
 
     ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
-    save_artifact(logistic_pipeline, ARTIFACT_DIR / "logistic_sentiment_pipeline.pkl")
+    logistic_artifact = ARTIFACT_DIR / "logistic_sentiment_pipeline.pkl"
+    if logistic_artifact.exists():
+        logistic_artifact.unlink()
     save_artifact(naive_bayes_pipeline, ARTIFACT_DIR / "naive_bayes_sentiment_pipeline.pkl")
 
     test_predictions = pd.DataFrame(
         {
             "message": x_test.values,
             "pseudo_sentiment": y_test.values,
-            "logistic_prediction": logistic_pipeline.predict(x_test),
             "naive_bayes_prediction": naive_bayes_pipeline.predict(x_test),
         }
     )
     test_predictions.to_csv(ARTIFACT_DIR / "sentiment_test_predictions.csv", index=False)
 
     metrics = {
-        "logistic_regression": logistic_metrics,
         "naive_bayes": naive_bayes_metrics,
         "label_strategy": {
             "source": "comment_text_only",
@@ -247,13 +218,11 @@ def main() -> None:
     (ARTIFACT_DIR / "sentiment_metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
 
     print("\n=== Sentiment Model Comparison ===")
-    for name, values in (("Logistic Regression", logistic_metrics), ("Naive Bayes", naive_bayes_metrics)):
-        print(f"\n{name}")
-        for metric_name, metric_value in values.items():
-            if metric_name in {"confusion_matrix", "classification_report"}:
-                print(f"{metric_name}: {metric_value}")
-            else:
-                print(f"{metric_name}: {metric_value:.4f}")
+    for metric_name, metric_value in naive_bayes_metrics.items():
+        if metric_name in {"confusion_matrix", "classification_report"}:
+            print(f"{metric_name}: {metric_value}")
+        else:
+            print(f"{metric_name}: {metric_value:.4f}")
 
     print(f"\nArtifacts saved to: {ARTIFACT_DIR.resolve()}")
 

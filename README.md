@@ -65,7 +65,6 @@ python train_sentiment_model.py
 
 Artefak NLP akan disimpan ke folder `artifacts/nlp/`:
 
-- `logistic_sentiment_pipeline.pkl`
 - `naive_bayes_sentiment_pipeline.pkl`
 - `sentiment_metrics.json`
 - `sentiment_test_predictions.csv`

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any, TypedDict
 
 import numpy as np
@@ -22,6 +23,8 @@ from src.churn_pipeline import (
 TARGET_COLUMN = "churned"
 AUTH_USERNAME = "Admin123"
 AUTH_PASSWORD = "12345678"
+PROJECT_ROOT = Path(__file__).resolve().parent
+NLP_ARTIFACT_DIR = PROJECT_ROOT / "artifacts" / "nlp"
 
 
 class ModelMetrics(TypedDict):
@@ -48,6 +51,13 @@ class AppAssets(TypedDict):
     xgb_explainer: Any
     selected_features: list[str]
 
+
+class NLPAssets(TypedDict):
+    sentiment_metrics: dict[str, Any]
+    sentiment_test_predictions: pd.DataFrame
+    session_summary: dict[str, Any]
+    session_summary_text: str
+
 st.set_page_config(
     page_title="Customer Churn Early Warning System",
     page_icon="📉",
@@ -72,6 +82,26 @@ def load_assets() -> AppAssets:
 @st.cache_data
 def load_source_data() -> pd.DataFrame:
     return load_dataset(DATA_PATH)
+
+
+@st.cache_data
+def load_nlp_assets() -> NLPAssets:
+    sentiment_metrics_path = NLP_ARTIFACT_DIR / "sentiment_metrics.json"
+    sentiment_predictions_path = NLP_ARTIFACT_DIR / "sentiment_test_predictions.csv"
+    session_summary_path = NLP_ARTIFACT_DIR / "session_summary.json"
+    session_summary_text_path = NLP_ARTIFACT_DIR / "session_summary.txt"
+
+    sentiment_metrics = json.loads(sentiment_metrics_path.read_text(encoding="utf-8")) if sentiment_metrics_path.exists() else {}
+    sentiment_predictions = pd.read_csv(sentiment_predictions_path) if sentiment_predictions_path.exists() else pd.DataFrame()
+    session_summary = json.loads(session_summary_path.read_text(encoding="utf-8")) if session_summary_path.exists() else {}
+    session_summary_text = session_summary_text_path.read_text(encoding="utf-8") if session_summary_text_path.exists() else ""
+
+    return {
+        "sentiment_metrics": sentiment_metrics,
+        "sentiment_test_predictions": sentiment_predictions,
+        "session_summary": session_summary,
+        "session_summary_text": session_summary_text,
+    }
 
 
 def add_branding() -> None:
@@ -100,7 +130,38 @@ def add_branding() -> None:
             .dashboard-note p,
             .dashboard-note li,
             .dashboard-note span {
-                color: #e5e7eb;
+                color: var(--text-color);
+                opacity: 1;
+            }
+            .dashboard-note {
+                background: var(--secondary-background-color);
+                border: 1px solid rgba(148, 163, 184, 0.28);
+                border-left: 4px solid #2563eb;
+                border-radius: 14px;
+                padding: 0.85rem 1rem;
+                margin: 0.9rem 0 1rem;
+                box-shadow: 0 4px 14px rgba(15, 23, 42, 0.04);
+            }
+            .dashboard-note strong,
+            .dashboard-note b {
+                color: var(--text-color);
+            }
+            .stCaption,
+            .stMarkdown p,
+            .stMarkdown li {
+                color: var(--text-color);
+                opacity: 1;
+            }
+            .stAlert {
+                color: var(--text-color);
+            }
+            .stSidebar .stCaption,
+            .stSidebar p,
+            .stSidebar li,
+            .stSidebar label,
+            .stSidebar span {
+                color: var(--text-color);
+                opacity: 1;
             }
         </style>
         """,
@@ -123,18 +184,47 @@ def render_login_page() -> None:
     st.markdown(
         """
         <style>
+            .login-card {
+                background: var(--secondary-background-color);
+                border: 1px solid rgba(148, 163, 184, 0.28);
+                border-radius: 18px;
+                padding: 0;
+                box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
+            }
             .login-title {
                 font-size: 1.6rem;
                 font-weight: 700;
-                color: #f8fafc;
-                margin-bottom: 0.25rem;
+                color: var(--text-color);
+                margin: 0;
             }
             .login-subtitle {
-                color: #cbd5e1;
-                margin-bottom: 1rem;
+                color: var(--text-color);
+                opacity: 0.82;
+                margin: 0.4rem 0 0.85rem;
             }
             .login-caption {
-                color: #cbd5e1;
+                color: var(--text-color);
+                opacity: 0.75;
+                margin-top: 0.85rem;
+            }
+            .login-caption strong,
+            .login-caption b {
+                color: var(--text-color);
+                opacity: 1;
+            }
+            .stTextInput label,
+            .stTextInput p,
+            .stTextInput span {
+                color: var(--text-color) !important;
+                opacity: 1 !important;
+            }
+            .stTextInput input,
+            .stTextInput textarea {
+                color: var(--text-color) !important;
+            }
+            .stButton button {
+                border-radius: 12px;
+                font-weight: 600;
             }
         </style>
         """,
@@ -143,6 +233,7 @@ def render_login_page() -> None:
 
     left, center, right = st.columns([1, 1.5, 1])
     with center:
+        st.markdown('<div class="login-card">', unsafe_allow_html=True)
         st.markdown('<div class="login-title">Login to Dashboard</div>', unsafe_allow_html=True)
         st.markdown(
             '<div class="login-subtitle">Masukkan username dan password yang valid untuk membuka dashboard analisis churn.</div>',
@@ -168,6 +259,7 @@ def render_login_page() -> None:
             f'<div class="login-caption">Credential demo: username {AUTH_USERNAME} dan password {AUTH_PASSWORD}.</div>',
             unsafe_allow_html=True,
         )
+        st.markdown('</div>', unsafe_allow_html=True)
 
 
 def render_logout_button() -> None:
@@ -511,6 +603,100 @@ def recommendation_text(scored: pd.DataFrame) -> str:
     return "\n".join(f"- {item}" for item in derive_actions(scored))
 
 
+def render_nlp_section(nlp_assets: NLPAssets) -> None:
+    st.subheader("NLP: Sentiment Analysis dan Session Summary")
+    st.markdown(
+        '<div class="dashboard-note">Bagian NLP memakai komentar sebagai input. Kolom sentiment pada CSV tidak dipakai sebagai fitur; label training dibentuk otomatis dari isi komentar.</div>',
+        unsafe_allow_html=True,
+    )
+
+    sentiment_metrics = nlp_assets["sentiment_metrics"]
+    sentiment_predictions = nlp_assets["sentiment_test_predictions"]
+    session_summary = nlp_assets["session_summary"]
+    session_summary_text = nlp_assets["session_summary_text"]
+
+    left_col, right_col = st.columns([1.05, 0.95])
+    with left_col:
+        st.markdown("##### Sentiment Model Performance")
+        if sentiment_metrics:
+            nb_values = sentiment_metrics.get("naive_bayes", {})
+            sentiment_display = pd.DataFrame(
+                [
+                    {
+                        "Model": "Naive Bayes",
+                        "Accuracy": nb_values.get("accuracy", 0.0),
+                        "Precision (macro)": nb_values.get("precision_macro", 0.0),
+                        "Recall (macro)": nb_values.get("recall_macro", 0.0),
+                        "F1 (macro)": nb_values.get("f1_macro", 0.0),
+                    }
+                ]
+            )
+            st.dataframe(
+                sentiment_display.style.format(
+                    {
+                        "Accuracy": "{:.3f}",
+                        "Precision (macro)": "{:.3f}",
+                        "Recall (macro)": "{:.3f}",
+                        "F1 (macro)": "{:.3f}",
+                    }
+                ),
+                use_container_width=True,
+                height=220,
+            )
+            label_strategy = sentiment_metrics.get("label_strategy", {})
+            if label_strategy:
+                st.caption(
+                    "Training NLP memakai komentar saja dengan weak supervision: "
+                    f"source={label_strategy.get('source', '-')}, "
+                    f"method={label_strategy.get('label_method', '-')}, "
+                    f"dataset={label_strategy.get('dataset', '-')}."
+                )
+        else:
+            st.info("Artifact sentiment belum ditemukan.")
+
+        if not sentiment_predictions.empty:
+            with st.expander("Preview sentiment test predictions", expanded=False):
+                st.dataframe(sentiment_predictions.head(12), use_container_width=True, height=240)
+                st.download_button(
+                    label="Download sentiment test predictions",
+                    data=sentiment_predictions.to_csv(index=False).encode("utf-8"),
+                    file_name="sentiment_test_predictions.csv",
+                    mime="text/csv",
+                )
+
+    with right_col:
+        st.markdown("##### Session Summary")
+        if session_summary:
+            metric_cols = st.columns(2)
+            with metric_cols[0]:
+                st.metric("Total comments", session_summary.get("total_comments", 0))
+            with metric_cols[1]:
+                unique_commenters = session_summary.get("unique_commenters")
+                st.metric("Unique commenters", unique_commenters if unique_commenters is not None else "-")
+
+            if session_summary_text:
+                st.text_area("Extractive session summary", value=session_summary_text, height=220)
+
+            top_keywords = session_summary.get("top_keywords", [])
+            if top_keywords:
+                st.markdown("**Top keywords**")
+                st.dataframe(pd.DataFrame(top_keywords), use_container_width=True, height=200)
+
+            representative_comments = session_summary.get("representative_comments", [])
+            if representative_comments:
+                with st.expander("Representative comments", expanded=False):
+                    st.dataframe(pd.DataFrame(representative_comments), use_container_width=True, height=240)
+
+            st.download_button(
+                label="Download session summary JSON",
+                data=json.dumps(session_summary, indent=2, ensure_ascii=False).encode("utf-8"),
+                file_name="session_summary.json",
+                mime="application/json",
+            )
+        else:
+            st.info("Artifact session summary belum ditemukan.")
+
+
 def main() -> None:
     init_auth_state()
     add_branding()
@@ -522,6 +708,7 @@ def main() -> None:
     render_logout_button()
 
     assets = load_assets()
+    nlp_assets = load_nlp_assets()
     data = load_source_data()
     selected_features = assets["selected_features"]
 
@@ -666,6 +853,8 @@ def main() -> None:
 
     st.subheader("Retained action suggestion")
     st.success(recommendation_text(scored))
+
+    render_nlp_section(nlp_assets)
 
 
 if __name__ == "__main__":
