@@ -58,6 +58,12 @@ class NLPAssets(TypedDict):
     session_summary: dict[str, Any]
     session_summary_text: str
 
+
+class SegmentationAssets(TypedDict):
+    customer_clusters: pd.DataFrame
+    cluster_summary: pd.DataFrame
+    cluster_label_map: dict[int, str]
+
 st.set_page_config(
     page_title="Customer Churn Early Warning System",
     page_icon="📉",
@@ -102,6 +108,63 @@ def load_nlp_assets() -> NLPAssets:
         "session_summary": session_summary,
         "session_summary_text": session_summary_text,
     }
+
+
+def build_cluster_label_map(cluster_summary: pd.DataFrame) -> dict[int, str]:
+    if cluster_summary.empty or "cluster" not in cluster_summary.columns:
+        return {}
+
+    summary = cluster_summary.copy()
+    summary["cluster"] = summary["cluster"].astype(int)
+
+    label_map: dict[int, str] = {}
+    ordered_clusters = summary.sort_values("avg_monthly_revenue", ascending=False)["cluster"].tolist()
+    if ordered_clusters:
+        label_map[int(ordered_clusters[0])] = "High Value"
+
+    remaining = summary[~summary["cluster"].isin(label_map.keys())].copy()
+    if not remaining.empty:
+        at_risk_cluster = int(remaining.sort_values("churn_rate", ascending=False).iloc[0]["cluster"])
+        label_map[at_risk_cluster] = "At Risk"
+
+    remaining = summary[~summary["cluster"].isin(label_map.keys())].copy()
+    if not remaining.empty:
+        low_engagement_cluster = int(remaining.sort_values(["avg_nps_score", "avg_last_login_days_ago"], ascending=[True, False]).iloc[0]["cluster"])
+        label_map[low_engagement_cluster] = "Low Engagement"
+
+    for cluster_id in summary["cluster"].tolist():
+        label_map.setdefault(int(cluster_id), "Balanced")
+
+    return label_map
+
+
+@st.cache_data
+def load_segmentation_assets() -> SegmentationAssets:
+    clusters_path = ARTIFACT_DIR / "segmentation" / "customer_clusters.csv"
+    summary_path = ARTIFACT_DIR / "segmentation" / "cluster_summary.csv"
+
+    customer_clusters = pd.read_csv(clusters_path) if clusters_path.exists() else pd.DataFrame()
+    cluster_summary = pd.read_csv(summary_path) if summary_path.exists() else pd.DataFrame()
+    cluster_label_map = build_cluster_label_map(cluster_summary)
+
+    return {
+        "customer_clusters": customer_clusters,
+        "cluster_summary": cluster_summary,
+        "cluster_label_map": cluster_label_map,
+    }
+
+
+def attach_segmentation(frame: pd.DataFrame, segmentation_assets: SegmentationAssets) -> pd.DataFrame:
+    cluster_frame = segmentation_assets["customer_clusters"]
+    if cluster_frame.empty or "customer_id" not in cluster_frame.columns:
+        result = frame.copy()
+        result["cluster"] = pd.NA
+        result["segment_label"] = "Unknown"
+        return result
+
+    result = frame.merge(cluster_frame, on="customer_id", how="left")
+    result["segment_label"] = result["cluster"].map(segmentation_assets["cluster_label_map"]).fillna("Unknown")
+    return result
 
 
 def add_branding() -> None:
@@ -166,6 +229,86 @@ def add_branding() -> None:
         </style>
         """,
         unsafe_allow_html=True,
+    )
+
+
+def render_segmentation_section(segmentation_assets: SegmentationAssets) -> None:
+    st.subheader("Customer Segmentation")
+    st.markdown(
+        '<div class="dashboard-note">Segmentasi memakai K-Means untuk mengelompokkan pelanggan berdasarkan perilaku. Cluster ini tidak dipakai untuk melatih churn, tetapi untuk analisis segmen dan strategi tindak lanjut.</div>',
+        unsafe_allow_html=True,
+    )
+
+    cluster_summary = segmentation_assets["cluster_summary"]
+    if cluster_summary.empty:
+        st.info("Artifact segmentasi belum ditemukan.")
+        return
+
+    summary_display = cluster_summary.copy()
+    summary_display["segment_label"] = summary_display["cluster"].astype(int).map(segmentation_assets["cluster_label_map"]).fillna("Balanced")
+    summary_display = summary_display[[
+        "cluster",
+        "segment_label",
+        "customer_count",
+        "avg_tenure_months",
+        "avg_monthly_revenue",
+        "avg_last_login_days_ago",
+        "avg_support_tickets_last_90d",
+        "avg_nps_score",
+        "avg_payment_delay_count",
+        "churn_rate",
+    ]]
+
+    metric_cols = st.columns(4)
+    with metric_cols[0]:
+        st.metric("Jumlah cluster", len(summary_display))
+    with metric_cols[1]:
+        st.metric("Total customer tersegmentasi", int(summary_display["customer_count"].sum()))
+    with metric_cols[2]:
+        top_value_cluster = summary_display.sort_values("avg_monthly_revenue", ascending=False).iloc[0]
+        st.metric("Segmen value tertinggi", top_value_cluster["segment_label"])
+    with metric_cols[3]:
+        top_risk_cluster = summary_display.sort_values("churn_rate", ascending=False).iloc[0]
+        st.metric("Segmen risiko tertinggi", top_risk_cluster["segment_label"])
+
+    left_col, right_col = st.columns([1, 1])
+    with left_col:
+        st.markdown("##### Segment Summary")
+        st.dataframe(
+            summary_display.style.format(
+                {
+                    "avg_tenure_months": "{:.2f}",
+                    "avg_monthly_revenue": "{:.2f}",
+                    "avg_last_login_days_ago": "{:.2f}",
+                    "avg_support_tickets_last_90d": "{:.2f}",
+                    "avg_nps_score": "{:.2f}",
+                    "avg_payment_delay_count": "{:.2f}",
+                    "churn_rate": "{:.2%}",
+                }
+            ),
+            use_container_width=True,
+            height=280,
+        )
+    with right_col:
+        st.markdown("##### Segment Interpretation")
+        for _, row in summary_display.sort_values("customer_count", ascending=False).iterrows():
+            st.markdown(
+                f"""
+                **Cluster {int(row['cluster'])} - {row['segment_label']}**
+
+                - Customer count: {int(row['customer_count'])}
+                - Avg revenue: {row['avg_monthly_revenue']:.2f}
+                - Avg last login days: {row['avg_last_login_days_ago']:.2f}
+                - Avg NPS: {row['avg_nps_score']:.2f}
+                - Churn rate: {row['churn_rate']:.2%}
+                """
+            )
+
+    st.download_button(
+        label="Download cluster summary",
+        data=summary_display.to_csv(index=False).encode("utf-8"),
+        file_name="cluster_summary_with_labels.csv",
+        mime="text/csv",
     )
 
 
@@ -277,10 +420,16 @@ def filter_data(frame: pd.DataFrame) -> pd.DataFrame:
     plan_types = sorted(frame["plan_type"].unique().tolist())
     contract_types = sorted(frame["contract_type"].unique().tolist())
     churn_filters = ["Semua", "Churn", "Tidak Churn"]
+    segment_column = "segment_label" if "segment_label" in frame.columns else None
 
     selected_plans = st.sidebar.multiselect("Plan Type", plan_types, default=plan_types)
     selected_contracts = st.sidebar.multiselect("Contract Type", contract_types, default=contract_types)
     selected_churn_status = st.sidebar.radio("Actual churn status", churn_filters, index=0)
+    selected_segments: list[str] = []
+    if segment_column:
+        segment_options = sorted([value for value in frame[segment_column].dropna().unique().tolist() if value != "Unknown"])
+        if segment_options:
+            selected_segments = st.sidebar.multiselect("Cluster segment", segment_options, default=segment_options)
 
     with st.sidebar.expander("Advanced filters", expanded=False):
         tenure_min, tenure_max = int(frame["tenure_months"].min()), int(frame["tenure_months"].max())
@@ -325,6 +474,9 @@ def filter_data(frame: pd.DataFrame) -> pd.DataFrame:
         filtered = filtered[filtered[TARGET_COLUMN] == 1]
     elif selected_churn_status == "Tidak Churn":
         filtered = filtered[filtered[TARGET_COLUMN] == 0]
+
+    if segment_column and selected_segments:
+        filtered = filtered[filtered[segment_column].isin(selected_segments)]
 
     return filtered
 
@@ -459,7 +611,7 @@ def build_shap_summary(scored: pd.DataFrame, xgb_pipeline, explainer, selected_f
 
     sample = scored.reset_index(drop=True).copy()
     feature_frame = sample.drop(
-        columns=[ID_COLUMN, TARGET_COLUMN, "churn_probability", "risk_flag", "risk_rank", "actual_churn_label", "predicted_churn_label", "match_flag"],
+        columns=[ID_COLUMN, TARGET_COLUMN, "cluster", "segment_label", "churn_probability", "risk_flag", "risk_rank", "actual_churn_label", "predicted_churn_label", "match_flag"],
         errors="ignore",
     )
     if selected_features:
@@ -550,11 +702,8 @@ def explain_with_shap(scored: pd.DataFrame, xgb_pipeline, explainer, selected_fe
     fig.update_layout(height=420, margin=dict(l=10, r=10, t=55, b=10), coloraxis_showscale=False)
     st.plotly_chart(fig, use_container_width=True)
 
-    selected_customer = st.selectbox(
-        "Customer for local explanation",
-        options=scored[ID_COLUMN].tolist(),
-        index=0,
-    )
+    selected_customer = render_customer_navigator(scored[ID_COLUMN].tolist())
+    st.caption(f"Selected customer: {selected_customer}")
     row = scored.loc[scored[ID_COLUMN] == selected_customer].head(1).copy().reset_index(drop=True)
     row_features = row.drop(columns=[ID_COLUMN, TARGET_COLUMN, "churn_probability", "risk_flag", "risk_rank", "actual_churn_label", "predicted_churn_label", "match_flag"], errors="ignore")
     if selected_features:
@@ -601,6 +750,66 @@ def recommendation_text(scored: pd.DataFrame) -> str:
         return "Tidak ada data yang dapat dianalisis setelah filter diterapkan."
 
     return "\n".join(f"- {item}" for item in derive_actions(scored))
+
+
+def render_customer_navigator(customer_ids: list[str]) -> str:
+    if not customer_ids:
+        return ""
+
+    page_size = 8
+    total_pages = max(1, int(np.ceil(len(customer_ids) / page_size)))
+    page_key = "customer_nav_page"
+    index_key = "customer_nav_index"
+
+    if page_key not in st.session_state:
+        st.session_state[page_key] = 0
+    if index_key not in st.session_state:
+        st.session_state[index_key] = 0
+
+    st.session_state[page_key] = int(np.clip(st.session_state[page_key], 0, total_pages - 1))
+    st.session_state[index_key] = int(np.clip(st.session_state[index_key], 0, len(customer_ids) - 1))
+
+    current_page = st.session_state[page_key]
+    start = current_page * page_size
+    end = min(start + page_size, len(customer_ids))
+    page_options = customer_ids[start:end]
+
+    nav_left, nav_center, nav_right = st.columns([1, 2, 1])
+    with nav_left:
+        if st.button("Previous", use_container_width=True, disabled=st.session_state[index_key] <= 0):
+            st.session_state[index_key] -= 1
+            st.session_state[page_key] = st.session_state[index_key] // page_size
+            st.rerun()
+    with nav_center:
+        st.markdown(
+            f'<div class="dashboard-note">Navigasi customer: gunakan Previous/Next untuk pindah customer, atau pilih pada bar horizontal. Halaman {current_page + 1} dari {total_pages}.</div>',
+            unsafe_allow_html=True,
+        )
+    with nav_right:
+        if st.button("Next", use_container_width=True, disabled=st.session_state[index_key] >= len(customer_ids) - 1):
+            st.session_state[index_key] += 1
+            st.session_state[page_key] = st.session_state[index_key] // page_size
+            st.rerun()
+
+    if not page_options:
+        page_options = customer_ids[:page_size]
+        st.session_state[page_key] = 0
+
+    current_customer = customer_ids[st.session_state[index_key]]
+    if current_customer not in page_options:
+        current_customer = page_options[0]
+        st.session_state[index_key] = customer_ids.index(current_customer)
+
+    selected_customer = st.radio(
+        "Select customer",
+        options=page_options,
+        index=page_options.index(current_customer),
+        horizontal=True,
+        key=f"customer_radio_page_{current_page}",
+        label_visibility="collapsed",
+    )
+    st.session_state[index_key] = customer_ids.index(selected_customer)
+    return selected_customer
 
 
 def render_nlp_section(nlp_assets: NLPAssets) -> None:
@@ -709,7 +918,8 @@ def main() -> None:
 
     assets = load_assets()
     nlp_assets = load_nlp_assets()
-    data = load_source_data()
+    segmentation_assets = load_segmentation_assets()
+    data = attach_segmentation(load_source_data(), segmentation_assets)
     selected_features = assets["selected_features"]
 
     st.markdown(
@@ -799,6 +1009,8 @@ def main() -> None:
     st.subheader("Ranked customer list")
     display_columns = [
         ID_COLUMN,
+        "cluster",
+        "segment_label",
         "plan_type",
         "contract_type",
         "actual_churn_label",
@@ -853,6 +1065,8 @@ def main() -> None:
 
     st.subheader("Retained action suggestion")
     st.success(recommendation_text(scored))
+
+    render_segmentation_section(segmentation_assets)
 
     render_nlp_section(nlp_assets)
 
