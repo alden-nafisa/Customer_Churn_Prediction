@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, Mapping, TypedDict
 
 import numpy as np
 import pandas as pd
@@ -834,7 +834,7 @@ def build_number_input_kwargs(config: dict[str, Any]) -> dict[str, Any]:
     return kwargs
 
 
-def collect_out_of_range_warnings(frame: pd.DataFrame, selected_features: list[str], form_values: dict[str, Any]) -> list[str]:
+def collect_out_of_range_warnings(frame: pd.DataFrame, selected_features: list[str], form_values: Mapping[str, Any]) -> list[str]:
     warnings: list[str] = []
     for column in selected_features:
         if column not in form_values or not pd.api.types.is_numeric_dtype(frame[column]):
@@ -865,6 +865,103 @@ def build_manual_input_row(frame: pd.DataFrame, selected_features: list[str], fo
         elif column in defaults:
             row[column] = defaults[column]
     return pd.DataFrame([row])
+
+
+def build_single_prediction_output(
+    input_frame: pd.DataFrame,
+    data: pd.DataFrame,
+    assets: AppAssets,
+    selected_features: list[str],
+    selected_model_name: str,
+    threshold: float,
+) -> tuple[pd.DataFrame, pd.DataFrame, float, str, str, list[str]]:
+    xgb_pipeline = assets["xgb_pipeline"]
+    catboost_pipeline = assets["catboost_pipeline"]
+    model_lookup = {
+        "XGBoost": (xgb_pipeline, assets["xgb_explainer"]),
+        "CatBoost": (catboost_pipeline, assets["catboost_explainer"]),
+    }
+
+    feature_frame = input_frame.drop(columns=[ID_COLUMN], errors="ignore")
+    if selected_features:
+        feature_frame = feature_frame[[column for column in selected_features if column in feature_frame.columns]].copy()
+
+    xgb_probability = float(xgb_pipeline.predict_proba(feature_frame)[:, 1][0])
+    catboost_probability = float(catboost_pipeline.predict_proba(feature_frame)[:, 1][0])
+    comparison = pd.DataFrame(
+        [
+            {"Model": "XGBoost", "Probability": xgb_probability, "Risk": "High Risk" if xgb_probability >= threshold else "Low Risk"},
+            {"Model": "CatBoost", "Probability": catboost_probability, "Risk": "High Risk" if catboost_probability >= threshold else "Low Risk"},
+        ]
+    )
+
+    selected_pipeline, selected_explainer = model_lookup[selected_model_name]
+    local_shap_df = explain_single_input(input_frame, selected_pipeline, selected_explainer, selected_features)
+    top_driver = local_shap_df.iloc[-1]["feature"] if not local_shap_df.empty else "unknown"
+    reference_medians = data.median(numeric_only=True)
+    recommendation = recommend_action_for_row(input_frame.iloc[0], top_driver, reference_medians)
+    chosen_probability = xgb_probability if selected_model_name == "XGBoost" else catboost_probability
+    chosen_risk = "High Risk" if chosen_probability >= threshold else "Low Risk"
+    input_row_values: dict[str, Any] = {str(column): value for column, value in input_frame.iloc[0].items()}
+    range_warnings = collect_out_of_range_warnings(data, selected_features, input_row_values)
+
+    return comparison, local_shap_df, chosen_probability, chosen_risk, recommendation, range_warnings
+
+
+def render_single_prediction_result(
+    input_frame: pd.DataFrame,
+    data: pd.DataFrame,
+    assets: AppAssets,
+    selected_features: list[str],
+    selected_model_name: str,
+    threshold: float,
+) -> None:
+    comparison, local_shap_df, chosen_probability, chosen_risk, recommendation, range_warnings = build_single_prediction_output(
+        input_frame,
+        data,
+        assets,
+        selected_features,
+        selected_model_name,
+        threshold,
+    )
+
+    st.markdown("##### Prediction Result")
+    result_cols = st.columns(3)
+    with result_cols[0]:
+        st.metric(f"{selected_model_name} probability", f"{chosen_probability:.2%}")
+    with result_cols[1]:
+        st.metric("Risk status", chosen_risk)
+    with result_cols[2]:
+        st.metric("Threshold", f"{threshold:.2%}")
+
+    st.dataframe(comparison.style.format({"Probability": "{:.2%}"}), use_container_width=True, height=160)
+
+    st.caption(f"Model utama yang dipakai untuk penjelasan SHAP: {selected_model_name}")
+
+    shap_fig = px.bar(
+        local_shap_df.sort_values("shap_value", ascending=True),
+        x="shap_value",
+        y="feature",
+        orientation="h",
+        title=f"Local SHAP explanation for {selected_model_name}",
+        color="shap_value",
+        color_continuous_scale="RdBu",
+    )
+    shap_fig.update_layout(height=420, margin=dict(l=10, r=10, t=55, b=10), coloraxis_showscale=False)
+    st.plotly_chart(shap_fig, use_container_width=True)
+
+    top_driver = local_shap_df.iloc[-1]["feature"] if not local_shap_df.empty else "unknown"
+    st.info(
+        f"{selected_model_name} memprediksi churn sebesar {chosen_probability:.2%}. "
+        f"Driver utama: {top_driver}. Rekomendasi: {recommendation}"
+    )
+
+    if range_warnings:
+        st.warning(
+            "Beberapa nilai berada di luar rentang training yang dipakai model:\n- "
+            + "\n- ".join(range_warnings)
+            + "\nHasil prediksi tetap dapat dihitung, tetapi interpretasinya perlu lebih hati-hati."
+        )
 
 
 def explain_single_input(input_frame: pd.DataFrame, pipeline, explainer, selected_features: list[str]) -> pd.DataFrame:
@@ -903,152 +1000,101 @@ def render_predict_page(data: pd.DataFrame, assets: AppAssets, selected_features
         '<div class="dashboard-note">Halaman ini ditujukan untuk user umum. Isi form customer, klik prediksi, lalu lihat hasil risiko dari XGBoost dan CatBoost tanpa perlu menggeser banyak filter.</div>',
         unsafe_allow_html=True,
     )
+    mode = st.radio("Predict mode", ["Predict Input", "Existing Customer"], horizontal=True, index=0)
 
-    with st.form("customer_prediction_form"):
-        left_col, right_col = st.columns([1, 1])
-        form_values: dict[str, Any] = {}
+    if mode == "Predict Input":
+        with st.form("customer_prediction_form"):
+            left_col, right_col = st.columns([1, 1])
+            form_values: dict[str, Any] = {}
 
-        with left_col:
-            st.markdown("##### Profil & Kontrak")
-            if "tenure_months" in selected_features:
-                config = get_numeric_field_config(data, "tenure_months", defaults)
-                form_values["tenure_months"] = st.number_input(
-                    "Tenure (months)",
-                    **build_number_input_kwargs(config),
-                )
+            with left_col:
+                st.markdown("##### Profil & Kontrak")
+                if "tenure_months" in selected_features:
+                    config = get_numeric_field_config(data, "tenure_months", defaults)
+                    form_values["tenure_months"] = st.number_input("Tenure (months)", **build_number_input_kwargs(config))
 
-            if "contract_type" in selected_features:
-                contract_options = categorical_options.get("contract_type", [str(defaults.get("contract_type", ""))])
-                default_contract = defaults.get("contract_type", contract_options[0])
-                default_index = contract_options.index(default_contract) if default_contract in contract_options else 0
-                form_values["contract_type"] = st.selectbox("Contract Type", contract_options, index=default_index)
+                if "contract_type" in selected_features:
+                    contract_options = categorical_options.get("contract_type", [str(defaults.get("contract_type", ""))])
+                    default_contract = defaults.get("contract_type", contract_options[0])
+                    default_index = contract_options.index(default_contract) if default_contract in contract_options else 0
+                    form_values["contract_type"] = st.selectbox("Contract Type", contract_options, index=default_index)
 
-            if "monthly_usage_hrs" in selected_features:
-                config = get_numeric_field_config(data, "monthly_usage_hrs", defaults)
-                form_values["monthly_usage_hrs"] = st.number_input(
-                    "Monthly Usage Hours",
-                    **build_number_input_kwargs(config),
-                )
+                if "monthly_usage_hrs" in selected_features:
+                    config = get_numeric_field_config(data, "monthly_usage_hrs", defaults)
+                    form_values["monthly_usage_hrs"] = st.number_input("Monthly Usage Hours", **build_number_input_kwargs(config))
 
-        with right_col:
-            st.markdown("##### Aktivitas & Risiko")
-            if "last_login_days_ago" in selected_features:
-                config = get_numeric_field_config(data, "last_login_days_ago", defaults)
-                form_values["last_login_days_ago"] = st.number_input(
-                    "Days Since Last Login",
-                    **build_number_input_kwargs(config),
-                )
+            with right_col:
+                st.markdown("##### Aktivitas & Risiko")
+                if "last_login_days_ago" in selected_features:
+                    config = get_numeric_field_config(data, "last_login_days_ago", defaults)
+                    form_values["last_login_days_ago"] = st.number_input("Days Since Last Login", **build_number_input_kwargs(config))
 
-            if "nps_score" in selected_features:
-                config = get_numeric_field_config(data, "nps_score", defaults)
-                form_values["nps_score"] = st.number_input(
-                    "NPS Score",
-                    **build_number_input_kwargs(config),
-                )
+                if "nps_score" in selected_features:
+                    config = get_numeric_field_config(data, "nps_score", defaults)
+                    form_values["nps_score"] = st.number_input("NPS Score", **build_number_input_kwargs(config))
 
-            if "feature_adoption_pct" in selected_features:
-                config = get_numeric_field_config(data, "feature_adoption_pct", defaults)
-                form_values["feature_adoption_pct"] = st.number_input(
-                    "Feature Adoption %",
-                    **build_number_input_kwargs(config),
-                )
+                if "feature_adoption_pct" in selected_features:
+                    config = get_numeric_field_config(data, "feature_adoption_pct", defaults)
+                    form_values["feature_adoption_pct"] = st.number_input("Feature Adoption %", **build_number_input_kwargs(config))
 
-            if "support_tickets_last_90d" in selected_features:
-                config = get_numeric_field_config(data, "support_tickets_last_90d", defaults)
-                form_values["support_tickets_last_90d"] = st.number_input(
-                    "Support Tickets / 90 days",
-                    **build_number_input_kwargs(config),
-                )
+                if "support_tickets_last_90d" in selected_features:
+                    config = get_numeric_field_config(data, "support_tickets_last_90d", defaults)
+                    form_values["support_tickets_last_90d"] = st.number_input("Support Tickets / 90 days", **build_number_input_kwargs(config))
 
-            if "payment_delay_count" in selected_features:
-                config = get_numeric_field_config(data, "payment_delay_count", defaults)
-                form_values["payment_delay_count"] = st.number_input(
-                    "Payment Delay Count",
-                    **build_number_input_kwargs(config),
-                )
+                if "payment_delay_count" in selected_features:
+                    config = get_numeric_field_config(data, "payment_delay_count", defaults)
+                    form_values["payment_delay_count"] = st.number_input("Payment Delay Count", **build_number_input_kwargs(config))
 
-        st.caption("Numeric input boleh sedikit di luar rentang data training, tetapi hasil prediksi bisa kurang stabil jika terlalu ekstrem.")
+            st.caption("Numeric input boleh sedikit di luar rentang data training, tetapi hasil prediksi bisa kurang stabil jika terlalu ekstrem.")
+            submitted = st.form_submit_button("Hitung Risiko", use_container_width=True)
 
-        submitted = st.form_submit_button("Hitung Risiko", use_container_width=True)
+        if not submitted:
+            st.info("Isi form di atas lalu klik Hitung Risiko untuk melihat hasil prediksi.")
+            return
 
-    if not submitted:
-        st.info("Isi form di atas lalu klik Hitung Risiko untuk melihat hasil prediksi.")
+        input_frame = build_manual_input_row(data, selected_features, form_values)
+        input_frame.insert(0, ID_COLUMN, "SIMULASI-001")
+        render_single_prediction_result(input_frame, data, assets, selected_features, selected_model_name, threshold)
+        st.markdown(
+            '<div class="dashboard-note">Gunakan page ini untuk simulasi cepat. Jika ingin menyaring data historis, membandingkan metrik model, dan melihat customer navigator SHAP, pindah ke Advanced Analysis.</div>',
+            unsafe_allow_html=True,
+        )
         return
 
-    input_frame = build_manual_input_row(data, selected_features, form_values)
-    input_frame.insert(0, ID_COLUMN, "SIMULASI-001")
-    range_warnings = collect_out_of_range_warnings(data, selected_features, form_values)
-
-    xgb_pipeline = assets["xgb_pipeline"]
-    catboost_pipeline = assets["catboost_pipeline"]
-    model_lookup = {
-        "XGBoost": (xgb_pipeline, assets["xgb_explainer"]),
-        "CatBoost": (catboost_pipeline, assets["catboost_explainer"]),
-    }
-
-    xgb_probability = float(xgb_pipeline.predict_proba(input_frame[selected_features])[:, 1][0]) if selected_features else float(xgb_pipeline.predict_proba(input_frame.drop(columns=[ID_COLUMN], errors="ignore"))[:, 1][0])
-    catboost_probability = float(catboost_pipeline.predict_proba(input_frame[selected_features])[:, 1][0]) if selected_features else float(catboost_pipeline.predict_proba(input_frame.drop(columns=[ID_COLUMN], errors="ignore"))[:, 1][0])
-
-    comparison = pd.DataFrame(
-        [
-            {"Model": "XGBoost", "Probability": xgb_probability, "Risk": "High Risk" if xgb_probability >= threshold else "Low Risk"},
-            {"Model": "CatBoost", "Probability": catboost_probability, "Risk": "High Risk" if catboost_probability >= threshold else "Low Risk"},
-        ]
+    customer_ids = data[ID_COLUMN].astype(str).tolist()
+    selected_customer_id = st.selectbox(
+        "Customer ID",
+        options=customer_ids,
+        index=0,
+        help="Cari atau pilih customer yang sudah ada di dataset untuk dicek risikonya.",
     )
 
-    st.markdown("##### Prediction Result")
-    result_cols = st.columns(3)
-    chosen_probability = xgb_probability if selected_model_name == "XGBoost" else catboost_probability
-    chosen_risk = "High Risk" if chosen_probability >= threshold else "Low Risk"
-    with result_cols[0]:
-        st.metric(f"{selected_model_name} probability", f"{chosen_probability:.2%}")
-    with result_cols[1]:
-        st.metric("Risk status", chosen_risk)
-    with result_cols[2]:
-        st.metric("Threshold", f"{threshold:.2%}")
+    customer_row = data.loc[data[ID_COLUMN].astype(str) == str(selected_customer_id)].head(1).copy()
+    if customer_row.empty:
+        st.warning("Customer ID tidak ditemukan di dataset saat ini.")
+        return
 
-    st.dataframe(
-        comparison.style.format({"Probability": "{:.2%}"}),
-        use_container_width=True,
-        height=160,
-    )
+    st.markdown("##### Detail Profil Customer")
+    profile_cols = st.columns(3)
+    profile = customer_row.iloc[0]
+    with profile_cols[0]:
+        st.metric("Customer ID", str(profile[ID_COLUMN]))
+        st.metric("Plan Type", str(profile.get("plan_type", "-")))
+    with profile_cols[1]:
+        st.metric("Contract Type", str(profile.get("contract_type", "-")))
+        st.metric("Tenure", f"{profile.get('tenure_months', 0)} months")
+    with profile_cols[2]:
+        st.metric("Monthly Revenue", f"{float(profile.get('monthly_revenue', 0.0)):.2f}")
+        st.metric("NPS", str(profile.get("nps_score", "-")))
 
-    st.caption(f"Model utama yang dipakai untuk penjelasan SHAP: {selected_model_name}")
+    with st.expander("View full customer profile", expanded=False):
+        st.dataframe(customer_row.T.rename(columns={customer_row.index[0]: "value"}), use_container_width=True)
 
-    selected_pipeline, selected_explainer = model_lookup[selected_model_name]
-    local_shap_df = explain_single_input(input_frame, selected_pipeline, selected_explainer, selected_features)
-
-    shap_fig = px.bar(
-        local_shap_df.sort_values("shap_value", ascending=True),
-        x="shap_value",
-        y="feature",
-        orientation="h",
-        title=f"Local SHAP explanation for simulated customer ({selected_model_name})",
-        color="shap_value",
-        color_continuous_scale="RdBu",
-    )
-    shap_fig.update_layout(height=420, margin=dict(l=10, r=10, t=55, b=10), coloraxis_showscale=False)
-    st.plotly_chart(shap_fig, use_container_width=True)
-
-    top_driver = local_shap_df.iloc[-1]["feature"] if not local_shap_df.empty else "unknown"
-    reference_medians = data.median(numeric_only=True)
-    recommendation = recommend_action_for_row(input_frame.iloc[0], top_driver, reference_medians)
-    st.info(
-        f"{selected_model_name} memprediksi churn sebesar {chosen_probability:.2%}. "
-        f"Driver utama: {top_driver}. Rekomendasi: {recommendation}"
-    )
-
-    if range_warnings:
-        st.warning(
-            "Beberapa nilai berada di luar rentang training yang dipakai model:\n- "
-            + "\n- ".join(range_warnings)
-            + "\nHasil prediksi tetap dapat dihitung, tetapi interpretasinya perlu lebih hati-hati."
-        )
-
-    st.markdown(
-        '<div class="dashboard-note">Gunakan page ini untuk simulasi cepat. Jika ingin menyaring data historis, membandingkan metrik model, dan melihat customer navigator SHAP, pindah ke Advanced Analysis.</div>',
-        unsafe_allow_html=True,
-    )
+    if st.button("Check Risk", use_container_width=True):
+        input_frame = customer_row[[ID_COLUMN] + [column for column in selected_features if column in customer_row.columns]].copy()
+        render_single_prediction_result(input_frame, data, assets, selected_features, selected_model_name, threshold)
+    else:
+        st.info("Klik Check Risk untuk melihat hasil prediksi customer ini.")
 
 
 def render_advanced_analysis_page(
