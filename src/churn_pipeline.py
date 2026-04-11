@@ -11,8 +11,6 @@ from imblearn.over_sampling import SMOTE
 from imblearn.pipeline import Pipeline as ImbPipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
-from sklearn.linear_model import LogisticRegression
-from sklearn.naive_bayes import GaussianNB
 from sklearn.metrics import (
     accuracy_score,
     average_precision_score,
@@ -25,6 +23,7 @@ from sklearn.metrics import (
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline as SkPipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from catboost import CatBoostClassifier
 from xgboost import XGBClassifier
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -96,18 +95,6 @@ def build_imbalance_aware_pipeline(
     return ImbPipeline(steps=steps)
 
 
-def build_logistic_pipeline(numeric_features: list[str], categorical_features: list[str]) -> ImbPipeline:
-    return build_imbalance_aware_pipeline(
-        numeric_features,
-        categorical_features,
-        scale_numeric=True,
-        model=LogisticRegression(
-            max_iter=4000,
-            random_state=RANDOM_STATE,
-        ),
-    )
-
-
 def build_xgb_pipeline(numeric_features: list[str], categorical_features: list[str]) -> ImbPipeline:
     return build_imbalance_aware_pipeline(
         numeric_features,
@@ -130,12 +117,20 @@ def build_xgb_pipeline(numeric_features: list[str], categorical_features: list[s
     )
 
 
-def build_naive_bayes_pipeline(numeric_features: list[str], categorical_features: list[str]) -> ImbPipeline:
+def build_catboost_pipeline(numeric_features: list[str], categorical_features: list[str]) -> ImbPipeline:
     return build_imbalance_aware_pipeline(
         numeric_features,
         categorical_features,
         scale_numeric=False,
-        model=GaussianNB(var_smoothing=1e-9),
+        model=CatBoostClassifier(
+            iterations=400,
+            learning_rate=0.05,
+            depth=6,
+            loss_function="Logloss",
+            random_seed=RANDOM_STATE,
+            verbose=False,
+            allow_writing_files=False,
+        ),
     )
 
 

@@ -37,18 +37,19 @@ class ModelMetrics(TypedDict):
 
 
 class MetricsBundle(TypedDict):
-    logistic_regression: ModelMetrics
     xgboost: ModelMetrics
+    catboost: ModelMetrics
     feature_names: list[str]
     selected_features: list[str]
     feature_columns: dict[str, list[str]]
 
 
 class AppAssets(TypedDict):
-    logistic_pipeline: Any
     xgb_pipeline: Any
+    catboost_pipeline: Any
     metrics: MetricsBundle
     xgb_explainer: Any
+    catboost_explainer: Any
     selected_features: list[str]
 
 
@@ -57,12 +58,6 @@ class NLPAssets(TypedDict):
     sentiment_test_predictions: pd.DataFrame
     session_summary: dict[str, Any]
     session_summary_text: str
-
-
-class SegmentationAssets(TypedDict):
-    customer_clusters: pd.DataFrame
-    cluster_summary: pd.DataFrame
-    cluster_label_map: dict[int, str]
 
 st.set_page_config(
     page_title="Customer Churn Early Warning System",
@@ -73,14 +68,15 @@ st.set_page_config(
 
 @st.cache_resource
 def load_assets() -> AppAssets:
-    logistic_pipeline = load_artifact(ARTIFACT_DIR / "logistic_pipeline.joblib")
     xgb_pipeline = load_artifact(ARTIFACT_DIR / "xgb_pipeline.joblib")
+    catboost_pipeline = load_artifact(ARTIFACT_DIR / "catboost_pipeline.joblib")
     metrics = json.loads((ARTIFACT_DIR / "metrics.json").read_text(encoding="utf-8"))
     return {
-        "logistic_pipeline": logistic_pipeline,
         "xgb_pipeline": xgb_pipeline,
+        "catboost_pipeline": catboost_pipeline,
         "metrics": metrics,
         "xgb_explainer": shap.TreeExplainer(xgb_pipeline.named_steps["model"]),
+        "catboost_explainer": shap.TreeExplainer(catboost_pipeline.named_steps["model"]),
         "selected_features": metrics.get("selected_features", []),
     }
 
@@ -108,63 +104,6 @@ def load_nlp_assets() -> NLPAssets:
         "session_summary": session_summary,
         "session_summary_text": session_summary_text,
     }
-
-
-def build_cluster_label_map(cluster_summary: pd.DataFrame) -> dict[int, str]:
-    if cluster_summary.empty or "cluster" not in cluster_summary.columns:
-        return {}
-
-    summary = cluster_summary.copy()
-    summary["cluster"] = summary["cluster"].astype(int)
-
-    label_map: dict[int, str] = {}
-    ordered_clusters = summary.sort_values("avg_monthly_revenue", ascending=False)["cluster"].tolist()
-    if ordered_clusters:
-        label_map[int(ordered_clusters[0])] = "High Value"
-
-    remaining = summary[~summary["cluster"].isin(label_map.keys())].copy()
-    if not remaining.empty:
-        at_risk_cluster = int(remaining.sort_values("churn_rate", ascending=False).iloc[0]["cluster"])
-        label_map[at_risk_cluster] = "At Risk"
-
-    remaining = summary[~summary["cluster"].isin(label_map.keys())].copy()
-    if not remaining.empty:
-        low_engagement_cluster = int(remaining.sort_values(["avg_nps_score", "avg_last_login_days_ago"], ascending=[True, False]).iloc[0]["cluster"])
-        label_map[low_engagement_cluster] = "Low Engagement"
-
-    for cluster_id in summary["cluster"].tolist():
-        label_map.setdefault(int(cluster_id), "Balanced")
-
-    return label_map
-
-
-@st.cache_data
-def load_segmentation_assets() -> SegmentationAssets:
-    clusters_path = ARTIFACT_DIR / "segmentation" / "customer_clusters.csv"
-    summary_path = ARTIFACT_DIR / "segmentation" / "cluster_summary.csv"
-
-    customer_clusters = pd.read_csv(clusters_path) if clusters_path.exists() else pd.DataFrame()
-    cluster_summary = pd.read_csv(summary_path) if summary_path.exists() else pd.DataFrame()
-    cluster_label_map = build_cluster_label_map(cluster_summary)
-
-    return {
-        "customer_clusters": customer_clusters,
-        "cluster_summary": cluster_summary,
-        "cluster_label_map": cluster_label_map,
-    }
-
-
-def attach_segmentation(frame: pd.DataFrame, segmentation_assets: SegmentationAssets) -> pd.DataFrame:
-    cluster_frame = segmentation_assets["customer_clusters"]
-    if cluster_frame.empty or "customer_id" not in cluster_frame.columns:
-        result = frame.copy()
-        result["cluster"] = pd.NA
-        result["segment_label"] = "Unknown"
-        return result
-
-    result = frame.merge(cluster_frame, on="customer_id", how="left")
-    result["segment_label"] = result["cluster"].map(segmentation_assets["cluster_label_map"]).fillna("Unknown")
-    return result
 
 
 def add_branding() -> None:
@@ -229,86 +168,6 @@ def add_branding() -> None:
         </style>
         """,
         unsafe_allow_html=True,
-    )
-
-
-def render_segmentation_section(segmentation_assets: SegmentationAssets) -> None:
-    st.subheader("Customer Segmentation")
-    st.markdown(
-        '<div class="dashboard-note">Segmentasi memakai K-Means untuk mengelompokkan pelanggan berdasarkan perilaku. Cluster ini tidak dipakai untuk melatih churn, tetapi untuk analisis segmen dan strategi tindak lanjut.</div>',
-        unsafe_allow_html=True,
-    )
-
-    cluster_summary = segmentation_assets["cluster_summary"]
-    if cluster_summary.empty:
-        st.info("Artifact segmentasi belum ditemukan.")
-        return
-
-    summary_display = cluster_summary.copy()
-    summary_display["segment_label"] = summary_display["cluster"].astype(int).map(segmentation_assets["cluster_label_map"]).fillna("Balanced")
-    summary_display = summary_display[[
-        "cluster",
-        "segment_label",
-        "customer_count",
-        "avg_tenure_months",
-        "avg_monthly_revenue",
-        "avg_last_login_days_ago",
-        "avg_support_tickets_last_90d",
-        "avg_nps_score",
-        "avg_payment_delay_count",
-        "churn_rate",
-    ]]
-
-    metric_cols = st.columns(4)
-    with metric_cols[0]:
-        st.metric("Jumlah cluster", len(summary_display))
-    with metric_cols[1]:
-        st.metric("Total customer tersegmentasi", int(summary_display["customer_count"].sum()))
-    with metric_cols[2]:
-        top_value_cluster = summary_display.sort_values("avg_monthly_revenue", ascending=False).iloc[0]
-        st.metric("Segmen value tertinggi", top_value_cluster["segment_label"])
-    with metric_cols[3]:
-        top_risk_cluster = summary_display.sort_values("churn_rate", ascending=False).iloc[0]
-        st.metric("Segmen risiko tertinggi", top_risk_cluster["segment_label"])
-
-    left_col, right_col = st.columns([1, 1])
-    with left_col:
-        st.markdown("##### Segment Summary")
-        st.dataframe(
-            summary_display.style.format(
-                {
-                    "avg_tenure_months": "{:.2f}",
-                    "avg_monthly_revenue": "{:.2f}",
-                    "avg_last_login_days_ago": "{:.2f}",
-                    "avg_support_tickets_last_90d": "{:.2f}",
-                    "avg_nps_score": "{:.2f}",
-                    "avg_payment_delay_count": "{:.2f}",
-                    "churn_rate": "{:.2%}",
-                }
-            ),
-            use_container_width=True,
-            height=280,
-        )
-    with right_col:
-        st.markdown("##### Segment Interpretation")
-        for _, row in summary_display.sort_values("customer_count", ascending=False).iterrows():
-            st.markdown(
-                f"""
-                **Cluster {int(row['cluster'])} - {row['segment_label']}**
-
-                - Customer count: {int(row['customer_count'])}
-                - Avg revenue: {row['avg_monthly_revenue']:.2f}
-                - Avg last login days: {row['avg_last_login_days_ago']:.2f}
-                - Avg NPS: {row['avg_nps_score']:.2f}
-                - Churn rate: {row['churn_rate']:.2%}
-                """
-            )
-
-    st.download_button(
-        label="Download cluster summary",
-        data=summary_display.to_csv(index=False).encode("utf-8"),
-        file_name="cluster_summary_with_labels.csv",
-        mime="text/csv",
     )
 
 
@@ -420,16 +279,10 @@ def filter_data(frame: pd.DataFrame) -> pd.DataFrame:
     plan_types = sorted(frame["plan_type"].unique().tolist())
     contract_types = sorted(frame["contract_type"].unique().tolist())
     churn_filters = ["Semua", "Churn", "Tidak Churn"]
-    segment_column = "segment_label" if "segment_label" in frame.columns else None
 
     selected_plans = st.sidebar.multiselect("Plan Type", plan_types, default=plan_types)
     selected_contracts = st.sidebar.multiselect("Contract Type", contract_types, default=contract_types)
     selected_churn_status = st.sidebar.radio("Actual churn status", churn_filters, index=0)
-    selected_segments: list[str] = []
-    if segment_column:
-        segment_options = sorted([value for value in frame[segment_column].dropna().unique().tolist() if value != "Unknown"])
-        if segment_options:
-            selected_segments = st.sidebar.multiselect("Cluster segment", segment_options, default=segment_options)
 
     with st.sidebar.expander("Advanced filters", expanded=False):
         tenure_min, tenure_max = int(frame["tenure_months"].min()), int(frame["tenure_months"].max())
@@ -474,9 +327,6 @@ def filter_data(frame: pd.DataFrame) -> pd.DataFrame:
         filtered = filtered[filtered[TARGET_COLUMN] == 1]
     elif selected_churn_status == "Tidak Churn":
         filtered = filtered[filtered[TARGET_COLUMN] == 0]
-
-    if segment_column and selected_segments:
-        filtered = filtered[filtered[segment_column].isin(selected_segments)]
 
     return filtered
 
@@ -548,12 +398,10 @@ def plot_top_risks(scored: pd.DataFrame) -> None:
 
 
 def show_model_comparison(metrics: MetricsBundle) -> None:
-    comparison = pd.DataFrame(
-        [
-            {"model": "Logistic Regression", **metrics["logistic_regression"]},
-            {"model": "XGBoost", **metrics["xgboost"]},
-        ]
-    )
+    comparison = pd.DataFrame([
+        {"model": "XGBoost", **metrics["xgboost"]},
+        {"model": "CatBoost", **metrics["catboost"]},
+    ])
     display = comparison[["model", "accuracy", "precision", "recall", "f1", "roc_auc", "pr_auc"]].copy()
     display.columns = ["Model", "Accuracy", "Precision", "Recall", "F1", "ROC AUC", "PR AUC"]
     st.subheader("Model comparison")
@@ -589,15 +437,31 @@ def derive_actions(scored: pd.DataFrame) -> list[str]:
 def recommend_action_for_row(row: pd.Series, top_driver: str, medians: pd.Series) -> str:
     driver = str(top_driver).lower()
 
-    if "payment_delay" in driver or row["payment_delay_count"] >= medians.get("payment_delay_count", row["payment_delay_count"]):
+    def row_value(column: str) -> Any:
+        if column in row.index:
+            return row[column]
+        return None
+
+    def row_median_value(column: str) -> Any:
+        if column in medians.index:
+            return medians[column]
+        return None
+
+    payment_delay_count = row_value("payment_delay_count")
+    support_tickets_last_90d = row_value("support_tickets_last_90d")
+    last_login_days_ago = row_value("last_login_days_ago")
+    feature_adoption_pct = row_value("feature_adoption_pct")
+    nps_score = row_value("nps_score")
+
+    if payment_delay_count is not None and ("payment_delay" in driver or payment_delay_count >= row_median_value("payment_delay_count") if row_median_value("payment_delay_count") is not None else False):
         return "Prioritaskan follow-up penagihan dan tawarkan opsi pembayaran yang lebih fleksibel."
-    if "support_tickets" in driver or row["support_tickets_last_90d"] >= medians.get("support_tickets_last_90d", row["support_tickets_last_90d"]):
+    if support_tickets_last_90d is not None and ("support_tickets" in driver or support_tickets_last_90d >= row_median_value("support_tickets_last_90d") if row_median_value("support_tickets_last_90d") is not None else False):
         return "Lakukan eskalasi support dan periksa akar masalah yang berulang."
-    if "last_login" in driver or row["last_login_days_ago"] >= medians.get("last_login_days_ago", row["last_login_days_ago"]):
+    if last_login_days_ago is not None and ("last_login" in driver or last_login_days_ago >= row_median_value("last_login_days_ago") if row_median_value("last_login_days_ago") is not None else False):
         return "Jalankan re-engagement untuk pelanggan yang mulai jarang login."
-    if "feature_adoption" in driver or row["feature_adoption_pct"] <= medians.get("feature_adoption_pct", row["feature_adoption_pct"]):
+    if feature_adoption_pct is not None and ("feature_adoption" in driver or feature_adoption_pct <= row_median_value("feature_adoption_pct") if row_median_value("feature_adoption_pct") is not None else False):
         return "Berikan onboarding lanjutan dan edukasi fitur untuk meningkatkan adopsi produk."
-    if "nps" in driver or row["nps_score"] <= medians.get("nps_score", row["nps_score"]):
+    if nps_score is not None and ("nps" in driver or nps_score <= row_median_value("nps_score") if row_median_value("nps_score") is not None else False):
         return "Tindak lanjuti melalui survey dan outreach Customer Success untuk memahami sentimen pelanggan."
 
     return "Lakukan outreach Customer Success personal dan sesuaikan intervensi dengan segmen pelanggan."
@@ -611,7 +475,7 @@ def build_shap_summary(scored: pd.DataFrame, xgb_pipeline, explainer, selected_f
 
     sample = scored.reset_index(drop=True).copy()
     feature_frame = sample.drop(
-        columns=[ID_COLUMN, TARGET_COLUMN, "cluster", "segment_label", "churn_probability", "risk_flag", "risk_rank", "actual_churn_label", "predicted_churn_label", "match_flag"],
+        columns=[ID_COLUMN, TARGET_COLUMN, "churn_probability", "risk_flag", "risk_rank", "actual_churn_label", "predicted_churn_label", "match_flag"],
         errors="ignore",
     )
     if selected_features:
@@ -648,11 +512,8 @@ def build_shap_summary(scored: pd.DataFrame, xgb_pipeline, explainer, selected_f
 
 
 def build_explanation_summary(scored: pd.DataFrame, assets: AppAssets, model_name: str, threshold: float) -> str:
-    metrics_key = {
-        "XGBoost": "xgboost",
-        "Logistic Regression": "logistic_regression",
-    }.get(model_name, "xgboost")
-    model_metrics = assets["metrics"][metrics_key]
+    metrics_key = model_name.lower()
+    model_metrics = assets["metrics"].get(metrics_key, assets["metrics"]["xgboost"])
 
     actual_churn = int((scored[TARGET_COLUMN] == 1).sum())
     predicted_churn = int((scored["predicted_churn_label"] == "Churn").sum())
@@ -738,6 +599,11 @@ def explain_with_shap(scored: pd.DataFrame, xgb_pipeline, explainer, selected_fe
     )
     st.plotly_chart(local_fig, use_container_width=True)
 
+    st.markdown(
+        '<div class="dashboard-note">Navigasi customer: gunakan Previous/Next untuk pindah customer, atau pilih customer langsung dari dropdown di tengah. Pilihan ini hanya mengubah customer yang sedang dianalisis, bukan hasil training model.</div>',
+        unsafe_allow_html=True,
+    )
+
     probability = float(row["churn_probability"].iloc[0])
     st.info(
         f"Predicted churn probability for {selected_customer}: {probability:.2%}. "
@@ -756,58 +622,52 @@ def render_customer_navigator(customer_ids: list[str]) -> str:
     if not customer_ids:
         return ""
 
-    page_size = 8
-    total_pages = max(1, int(np.ceil(len(customer_ids) / page_size)))
-    page_key = "customer_nav_page"
     index_key = "customer_nav_index"
+    select_key = "customer_nav_select"
 
-    if page_key not in st.session_state:
-        st.session_state[page_key] = 0
+    def sync_customer_index() -> None:
+        st.session_state[index_key] = customer_ids.index(st.session_state[select_key])
+
+    def shift_customer(step: int) -> None:
+        current_index = customer_ids.index(st.session_state[select_key]) if select_key in st.session_state else 0
+        new_index = int(np.clip(current_index + step, 0, len(customer_ids) - 1))
+        st.session_state[select_key] = customer_ids[new_index]
+        st.session_state[index_key] = new_index
+
     if index_key not in st.session_state:
         st.session_state[index_key] = 0
+    if select_key not in st.session_state:
+        st.session_state[select_key] = customer_ids[0]
 
-    st.session_state[page_key] = int(np.clip(st.session_state[page_key], 0, total_pages - 1))
-    st.session_state[index_key] = int(np.clip(st.session_state[index_key], 0, len(customer_ids) - 1))
-
-    current_page = st.session_state[page_key]
-    start = current_page * page_size
-    end = min(start + page_size, len(customer_ids))
-    page_options = customer_ids[start:end]
+    st.session_state[index_key] = int(np.clip(customer_ids.index(st.session_state[select_key]), 0, len(customer_ids) - 1))
 
     nav_left, nav_center, nav_right = st.columns([1, 2, 1])
     with nav_left:
-        if st.button("Previous", use_container_width=True, disabled=st.session_state[index_key] <= 0):
-            st.session_state[index_key] -= 1
-            st.session_state[page_key] = st.session_state[index_key] // page_size
-            st.rerun()
+        st.button(
+            "Previous",
+            use_container_width=True,
+            disabled=st.session_state[index_key] <= 0,
+            on_click=shift_customer,
+            args=(-1,),
+        )
     with nav_center:
-        st.markdown(
-            f'<div class="dashboard-note">Navigasi customer: gunakan Previous/Next untuk pindah customer, atau pilih pada bar horizontal. Halaman {current_page + 1} dari {total_pages}.</div>',
-            unsafe_allow_html=True,
+        selected_customer = st.selectbox(
+            "Select customer",
+            options=customer_ids,
+            index=st.session_state[index_key],
+            key=select_key,
+            on_change=sync_customer_index,
+            label_visibility="collapsed",
         )
     with nav_right:
-        if st.button("Next", use_container_width=True, disabled=st.session_state[index_key] >= len(customer_ids) - 1):
-            st.session_state[index_key] += 1
-            st.session_state[page_key] = st.session_state[index_key] // page_size
-            st.rerun()
+        st.button(
+            "Next",
+            use_container_width=True,
+            disabled=st.session_state[index_key] >= len(customer_ids) - 1,
+            on_click=shift_customer,
+            args=(1,),
+        )
 
-    if not page_options:
-        page_options = customer_ids[:page_size]
-        st.session_state[page_key] = 0
-
-    current_customer = customer_ids[st.session_state[index_key]]
-    if current_customer not in page_options:
-        current_customer = page_options[0]
-        st.session_state[index_key] = customer_ids.index(current_customer)
-
-    selected_customer = st.radio(
-        "Select customer",
-        options=page_options,
-        index=page_options.index(current_customer),
-        horizontal=True,
-        key=f"customer_radio_page_{current_page}",
-        label_visibility="collapsed",
-    )
     st.session_state[index_key] = customer_ids.index(selected_customer)
     return selected_customer
 
@@ -906,62 +766,323 @@ def render_nlp_section(nlp_assets: NLPAssets) -> None:
             st.info("Artifact session summary belum ditemukan.")
 
 
-def main() -> None:
-    init_auth_state()
-    add_branding()
+def build_feature_defaults(frame: pd.DataFrame, selected_features: list[str]) -> dict[str, Any]:
+    defaults: dict[str, Any] = {}
+    for column in selected_features:
+        if column not in frame.columns:
+            continue
 
-    if not st.session_state.authenticated:
-        render_login_page()
-        return
+        series = frame[column].dropna()
+        if series.empty:
+            continue
 
-    render_logout_button()
+        if pd.api.types.is_numeric_dtype(frame[column]):
+            median_value = series.median()
+            if pd.api.types.is_integer_dtype(frame[column]):
+                defaults[column] = int(round(float(median_value)))
+            else:
+                defaults[column] = float(median_value)
+        else:
+            mode_values = series.mode()
+            defaults[column] = mode_values.iat[0] if not mode_values.empty else str(series.iloc[0])
 
-    assets = load_assets()
-    nlp_assets = load_nlp_assets()
-    segmentation_assets = load_segmentation_assets()
-    data = attach_segmentation(load_source_data(), segmentation_assets)
-    selected_features = assets["selected_features"]
+    return defaults
 
+
+def get_numeric_field_config(frame: pd.DataFrame, column: str, defaults: dict[str, Any]) -> dict[str, Any]:
+    series = frame[column].dropna()
+    training_min = float(series.min())
+    training_max = float(series.max())
+    span = training_max - training_min
+    padding = max(span * 0.2, 1.0) if span > 0 else max(abs(training_min) * 0.1, 1.0)
+
+    input_min = max(0.0, training_min - padding)
+    input_max = training_max + padding
+    default_value = defaults.get(column, series.median())
+
+    if pd.api.types.is_integer_dtype(frame[column]):
+        return {
+            "training_min": int(round(training_min)),
+            "training_max": int(round(training_max)),
+            "input_min": int(np.floor(input_min)),
+            "input_max": int(np.ceil(input_max)),
+            "default_value": int(round(float(default_value))),
+            "step": 1,
+            "format": None,
+        }
+
+    return {
+        "training_min": float(training_min),
+        "training_max": float(training_max),
+        "input_min": float(np.round(input_min, 1)),
+        "input_max": float(np.round(input_max, 1)),
+        "default_value": float(default_value),
+        "step": 0.1,
+        "format": "%.1f",
+    }
+
+
+def build_number_input_kwargs(config: dict[str, Any]) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
+        "min_value": config["input_min"],
+        "max_value": config["input_max"],
+        "value": config["default_value"],
+        "step": config["step"],
+    }
+    if config.get("format"):
+        kwargs["format"] = config["format"]
+    return kwargs
+
+
+def collect_out_of_range_warnings(frame: pd.DataFrame, selected_features: list[str], form_values: dict[str, Any]) -> list[str]:
+    warnings: list[str] = []
+    for column in selected_features:
+        if column not in form_values or not pd.api.types.is_numeric_dtype(frame[column]):
+            continue
+
+        series = frame[column].dropna()
+        if series.empty:
+            continue
+
+        training_min = float(series.min())
+        training_max = float(series.max())
+        value = float(form_values[column])
+        if value < training_min or value > training_max:
+            pretty_name = column.replace("_", " ").title()
+            warnings.append(
+                f"{pretty_name}: {value:g} berada di luar rentang training [{training_min:g} - {training_max:g}]"
+            )
+
+    return warnings
+
+
+def build_manual_input_row(frame: pd.DataFrame, selected_features: list[str], form_values: dict[str, Any]) -> pd.DataFrame:
+    row: dict[str, Any] = {}
+    defaults = build_feature_defaults(frame, selected_features)
+    for column in selected_features:
+        if column in form_values:
+            row[column] = form_values[column]
+        elif column in defaults:
+            row[column] = defaults[column]
+    return pd.DataFrame([row])
+
+
+def explain_single_input(input_frame: pd.DataFrame, pipeline, explainer, selected_features: list[str]) -> pd.DataFrame:
+    feature_frame = input_frame.drop(columns=[ID_COLUMN], errors="ignore")
+    if selected_features:
+        feature_frame = feature_frame[[column for column in selected_features if column in feature_frame.columns]].copy()
+
+    transformed = transform_features(pipeline, feature_frame)
+    explanation = explainer(transformed)
+    feature_names = pipeline.named_steps["preprocessor"].get_feature_names_out().tolist()
+    row_values = explanation.values[0]
+
+    local_df = pd.DataFrame({"feature": feature_names, "shap_value": row_values})
+    return local_df.sort_values("shap_value", key=lambda s: np.abs(s), ascending=False).head(10).sort_values("shap_value")
+
+
+def render_predict_page(data: pd.DataFrame, assets: AppAssets, selected_features: list[str], selected_model_name: str, threshold: float) -> None:
     st.markdown(
         """
         <div class="hero">
-            <h1>Customer Churn Early Warning Dashboard</h1>
-            <p>Prediksi risiko churn, bandingkan Logistic Regression dan XGBoost, lalu jelaskan alasan model dengan SHAP.</p>
+            <h1>Customer Churn Quick Prediction</h1>
+            <p>Masukkan profil customer untuk melihat risiko churn secara cepat. Hasil XGBoost dan CatBoost ditampilkan berdampingan.</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    st.sidebar.header("Scoring Settings")
-    selected_model_name = st.sidebar.radio("Scoring model", ["XGBoost", "Logistic Regression"], index=0)
-    threshold = st.sidebar.slider("Risk threshold", min_value=0.10, max_value=0.90, value=0.50, step=0.05)
-    st.sidebar.caption("Label churn historis dipakai hanya sebagai ground truth. Model memprediksi tanpa melihat kolom churned. Training memakai split stratified 80/20 dan SMOTE di data training.")
-    if selected_features:
-        st.sidebar.success(f"Auto-selected features: {len(selected_features)}")
-        st.sidebar.caption(", ".join(selected_features))
+    defaults = build_feature_defaults(data, selected_features)
+    categorical_options = {
+        column: sorted(data[column].dropna().astype(str).unique().tolist())
+        for column in selected_features
+        if column in data.columns and not pd.api.types.is_numeric_dtype(data[column])
+    }
+
+    st.markdown(
+        '<div class="dashboard-note">Halaman ini ditujukan untuk user umum. Isi form customer, klik prediksi, lalu lihat hasil risiko dari XGBoost dan CatBoost tanpa perlu menggeser banyak filter.</div>',
+        unsafe_allow_html=True,
+    )
+
+    with st.form("customer_prediction_form"):
+        left_col, right_col = st.columns([1, 1])
+        form_values: dict[str, Any] = {}
+
+        with left_col:
+            st.markdown("##### Profil & Kontrak")
+            if "tenure_months" in selected_features:
+                config = get_numeric_field_config(data, "tenure_months", defaults)
+                form_values["tenure_months"] = st.number_input(
+                    "Tenure (months)",
+                    **build_number_input_kwargs(config),
+                )
+
+            if "contract_type" in selected_features:
+                contract_options = categorical_options.get("contract_type", [str(defaults.get("contract_type", ""))])
+                default_contract = defaults.get("contract_type", contract_options[0])
+                default_index = contract_options.index(default_contract) if default_contract in contract_options else 0
+                form_values["contract_type"] = st.selectbox("Contract Type", contract_options, index=default_index)
+
+            if "monthly_usage_hrs" in selected_features:
+                config = get_numeric_field_config(data, "monthly_usage_hrs", defaults)
+                form_values["monthly_usage_hrs"] = st.number_input(
+                    "Monthly Usage Hours",
+                    **build_number_input_kwargs(config),
+                )
+
+        with right_col:
+            st.markdown("##### Aktivitas & Risiko")
+            if "last_login_days_ago" in selected_features:
+                config = get_numeric_field_config(data, "last_login_days_ago", defaults)
+                form_values["last_login_days_ago"] = st.number_input(
+                    "Days Since Last Login",
+                    **build_number_input_kwargs(config),
+                )
+
+            if "nps_score" in selected_features:
+                config = get_numeric_field_config(data, "nps_score", defaults)
+                form_values["nps_score"] = st.number_input(
+                    "NPS Score",
+                    **build_number_input_kwargs(config),
+                )
+
+            if "feature_adoption_pct" in selected_features:
+                config = get_numeric_field_config(data, "feature_adoption_pct", defaults)
+                form_values["feature_adoption_pct"] = st.number_input(
+                    "Feature Adoption %",
+                    **build_number_input_kwargs(config),
+                )
+
+            if "support_tickets_last_90d" in selected_features:
+                config = get_numeric_field_config(data, "support_tickets_last_90d", defaults)
+                form_values["support_tickets_last_90d"] = st.number_input(
+                    "Support Tickets / 90 days",
+                    **build_number_input_kwargs(config),
+                )
+
+            if "payment_delay_count" in selected_features:
+                config = get_numeric_field_config(data, "payment_delay_count", defaults)
+                form_values["payment_delay_count"] = st.number_input(
+                    "Payment Delay Count",
+                    **build_number_input_kwargs(config),
+                )
+
+        st.caption("Numeric input boleh sedikit di luar rentang data training, tetapi hasil prediksi bisa kurang stabil jika terlalu ekstrem.")
+
+        submitted = st.form_submit_button("Hitung Risiko", use_container_width=True)
+
+    if not submitted:
+        st.info("Isi form di atas lalu klik Hitung Risiko untuk melihat hasil prediksi.")
+        return
+
+    input_frame = build_manual_input_row(data, selected_features, form_values)
+    input_frame.insert(0, ID_COLUMN, "SIMULASI-001")
+    range_warnings = collect_out_of_range_warnings(data, selected_features, form_values)
+
+    xgb_pipeline = assets["xgb_pipeline"]
+    catboost_pipeline = assets["catboost_pipeline"]
+    model_lookup = {
+        "XGBoost": (xgb_pipeline, assets["xgb_explainer"]),
+        "CatBoost": (catboost_pipeline, assets["catboost_explainer"]),
+    }
+
+    xgb_probability = float(xgb_pipeline.predict_proba(input_frame[selected_features])[:, 1][0]) if selected_features else float(xgb_pipeline.predict_proba(input_frame.drop(columns=[ID_COLUMN], errors="ignore"))[:, 1][0])
+    catboost_probability = float(catboost_pipeline.predict_proba(input_frame[selected_features])[:, 1][0]) if selected_features else float(catboost_pipeline.predict_proba(input_frame.drop(columns=[ID_COLUMN], errors="ignore"))[:, 1][0])
+
+    comparison = pd.DataFrame(
+        [
+            {"Model": "XGBoost", "Probability": xgb_probability, "Risk": "High Risk" if xgb_probability >= threshold else "Low Risk"},
+            {"Model": "CatBoost", "Probability": catboost_probability, "Risk": "High Risk" if catboost_probability >= threshold else "Low Risk"},
+        ]
+    )
+
+    st.markdown("##### Prediction Result")
+    result_cols = st.columns(3)
+    chosen_probability = xgb_probability if selected_model_name == "XGBoost" else catboost_probability
+    chosen_risk = "High Risk" if chosen_probability >= threshold else "Low Risk"
+    with result_cols[0]:
+        st.metric(f"{selected_model_name} probability", f"{chosen_probability:.2%}")
+    with result_cols[1]:
+        st.metric("Risk status", chosen_risk)
+    with result_cols[2]:
+        st.metric("Threshold", f"{threshold:.2%}")
+
+    st.dataframe(
+        comparison.style.format({"Probability": "{:.2%}"}),
+        use_container_width=True,
+        height=160,
+    )
+
+    st.caption(f"Model utama yang dipakai untuk penjelasan SHAP: {selected_model_name}")
+
+    selected_pipeline, selected_explainer = model_lookup[selected_model_name]
+    local_shap_df = explain_single_input(input_frame, selected_pipeline, selected_explainer, selected_features)
+
+    shap_fig = px.bar(
+        local_shap_df.sort_values("shap_value", ascending=True),
+        x="shap_value",
+        y="feature",
+        orientation="h",
+        title=f"Local SHAP explanation for simulated customer ({selected_model_name})",
+        color="shap_value",
+        color_continuous_scale="RdBu",
+    )
+    shap_fig.update_layout(height=420, margin=dict(l=10, r=10, t=55, b=10), coloraxis_showscale=False)
+    st.plotly_chart(shap_fig, use_container_width=True)
+
+    top_driver = local_shap_df.iloc[-1]["feature"] if not local_shap_df.empty else "unknown"
+    reference_medians = data.median(numeric_only=True)
+    recommendation = recommend_action_for_row(input_frame.iloc[0], top_driver, reference_medians)
+    st.info(
+        f"{selected_model_name} memprediksi churn sebesar {chosen_probability:.2%}. "
+        f"Driver utama: {top_driver}. Rekomendasi: {recommendation}"
+    )
+
+    if range_warnings:
+        st.warning(
+            "Beberapa nilai berada di luar rentang training yang dipakai model:\n- "
+            + "\n- ".join(range_warnings)
+            + "\nHasil prediksi tetap dapat dihitung, tetapi interpretasinya perlu lebih hati-hati."
+        )
+
+    st.markdown(
+        '<div class="dashboard-note">Gunakan page ini untuk simulasi cepat. Jika ingin menyaring data historis, membandingkan metrik model, dan melihat customer navigator SHAP, pindah ke Advanced Analysis.</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def render_advanced_analysis_page(
+    data: pd.DataFrame,
+    assets: AppAssets,
+    nlp_assets: NLPAssets,
+    selected_features: list[str],
+    selected_model_name: str,
+    threshold: float,
+) -> None:
+    st.markdown(
+        """
+        <div class="hero">
+            <h1>Customer Churn Early Warning Dashboard</h1>
+            <p>Analisis mendalam dengan filter data, perbandingan XGBoost vs CatBoost, dan penjelasan SHAP per customer.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        '<div class="dashboard-note">Halaman ini ditujukan untuk user advance. Gunakan filter di sidebar untuk menyaring customer, lalu lihat metrik, ranking risiko, dan penjelasan model.</div>',
+        unsafe_allow_html=True,
+    )
 
     filtered = filter_data(data)
     if filtered.empty:
         st.warning("Tidak ada data yang cocok dengan filter saat ini.")
         return
 
-    pipeline_key = {
-        "XGBoost": "xgb_pipeline",
-        "Logistic Regression": "logistic_pipeline",
-    }[selected_model_name]
-    pipeline = assets[pipeline_key]
+    pipeline = assets["xgb_pipeline"] if selected_model_name == "XGBoost" else assets["catboost_pipeline"]
+    explainer = assets["xgb_explainer"] if selected_model_name == "XGBoost" else assets["catboost_explainer"]
     scored = score_frame(pipeline, filtered, threshold, selected_features)
-    global_shap_df, explanation_export = build_shap_summary(
-        scored,
-        assets["xgb_pipeline"],
-        assets["xgb_explainer"],
-        selected_features,
-    )
-
-    st.markdown(
-        '<div class="dashboard-note">Sistem klasifikasi: 80% data dipakai untuk training dan 20% untuk testing. SMOTE diterapkan pada data training. Kolom churned adalah label aktual, bukan input model.</div>',
-        unsafe_allow_html=True,
-    )
+    global_shap_df, explanation_export = build_shap_summary(scored, pipeline, explainer, selected_features)
 
     st.subheader("Penjelasan Risiko")
     st.markdown(build_explanation_summary(scored, assets, selected_model_name, threshold))
@@ -983,9 +1104,7 @@ def main() -> None:
 
     if selected_features:
         st.subheader("Fitur yang dipilih otomatis")
-        st.write(
-            "Model ini tidak memakai pilihan manual admin. Fitur berikut dipilih otomatis dari hasil training dan akan dipakai konsisten oleh pipeline."
-        )
+        st.write("Model ini tidak memakai pilihan manual admin. Fitur berikut dipilih otomatis dari hasil training dan akan dipakai konsisten oleh pipeline.")
         st.write(", ".join(selected_features))
 
     kpi_cards(scored, threshold)
@@ -1009,8 +1128,6 @@ def main() -> None:
     st.subheader("Ranked customer list")
     display_columns = [
         ID_COLUMN,
-        "cluster",
-        "segment_label",
         "plan_type",
         "contract_type",
         "actual_churn_label",
@@ -1057,18 +1174,45 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    if selected_model_name == "XGBoost":
-        explain_with_shap(scored, assets["xgb_pipeline"], assets["xgb_explainer"], selected_features)
-    else:
-        st.info("Panel SHAP tetap menggunakan model XGBoost karena pendekatan XAI pada proyek ini berfokus pada tree-based model utama.")
-        explain_with_shap(scored, assets["xgb_pipeline"], assets["xgb_explainer"], selected_features)
+    explain_with_shap(
+        scored,
+        pipeline,
+        explainer,
+        selected_features,
+    )
 
     st.subheader("Retained action suggestion")
     st.success(recommendation_text(scored))
 
-    render_segmentation_section(segmentation_assets)
-
     render_nlp_section(nlp_assets)
+
+
+def main() -> None:
+    init_auth_state()
+    add_branding()
+
+    if not st.session_state.authenticated:
+        render_login_page()
+        return
+
+    render_logout_button()
+
+    assets = load_assets()
+    nlp_assets = load_nlp_assets()
+    data = load_source_data()
+    selected_features = assets["selected_features"]
+    page_name = st.sidebar.radio("Dashboard page", ["Predict", "Advanced Analysis"], index=0)
+    selected_model_name = st.sidebar.radio("Scoring model", ["XGBoost", "CatBoost"], index=0)
+    threshold = st.sidebar.slider("Risk threshold", min_value=0.10, max_value=0.90, value=0.50, step=0.05)
+
+    st.sidebar.caption("Label churn historis dipakai hanya sebagai ground truth. Model memprediksi tanpa melihat kolom churned. Training memakai split stratified 80/20 dan SMOTE di data training.")
+    if selected_features:
+        st.sidebar.success(f"Auto-selected features: {len(selected_features)}")
+        st.sidebar.caption(", ".join(selected_features))
+    if page_name == "Predict":
+        render_predict_page(data, assets, selected_features, selected_model_name, threshold)
+    else:
+        render_advanced_analysis_page(data, assets, nlp_assets, selected_features, selected_model_name, threshold)
 
 
 if __name__ == "__main__":

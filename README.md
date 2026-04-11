@@ -2,19 +2,19 @@
 
 Proyek ini membangun sistem peringatan dini churn pelanggan untuk perusahaan SaaS dengan:
 
-- **Baseline model:** Logistic Regression
 - **Main model:** XGBoost
+- **Comparator model:** CatBoost
 - **Explainability:** SHAP
 - **Dashboard:** Streamlit
 
 ## Metode yang dipakai
 
 ### Machine learning untuk churn prediction
-- Logistic Regression
 - XGBoost
+- CatBoost
 
-### Data mining
-- K-Means dipakai untuk segmentasi pelanggan, bukan untuk prediksi churn.
+### Data preparation
+- Prapemrosesan data dilakukan melalui imputasi, encoding kategorikal, scaling fitur numerik, dan SMOTE pada data training churn yang imbalance.
 
 ### NLP
 - Sentiment analysis memakai komentar sebagai input dan label sentimen dibentuk otomatis dari teks.
@@ -29,11 +29,12 @@ Proyek ini membangun sistem peringatan dini churn pelanggan untuk perusahaan Saa
 
 - `customers_dataset_tidied.xlsx` — data pelanggan historis yang lebih rapi
 - `youtube_chat_5_menit_cleaned.csv` — dataset komentar live chat yang sudah dirapikan untuk eksperimen NLP
-- `train_model.py` — melatih model dan menyimpan artefak
-- `train_customer_segmentation.py` — segmentasi pelanggan dengan K-Means
+- `train_model.py` — melatih XGBoost dan CatBoost serta menyimpan artefak
 - `train_sentiment_model.py` — melatih model sentiment analysis untuk komentar live chat
 - `app.py` — dashboard interaktif
 - `src/churn_pipeline.py` — utilitas pemodelan
+- `src/supabase_config.py` — loader konfigurasi Supabase dari environment
+- `.env.example` — template variabel environment Supabase
 - `artifacts/` — model, metrik, dan output evaluasi
 
 ## Instalasi
@@ -52,8 +53,8 @@ python train_model.py
 
 Artefak akan disimpan ke folder `artifacts/`:
 
-- `logistic_pipeline.joblib`
 - `xgb_pipeline.joblib`
+- `catboost_pipeline.joblib`
 - `metrics.json`
 - `test_predictions.csv`
 
@@ -82,19 +83,6 @@ Ringkasan komentar akan disimpan ke `artifacts/nlp/`:
 - `session_summary.json`
 - `session_summary.txt`
 
-### Melatih segmentasi pelanggan
-
-```bash
-python train_customer_segmentation.py
-```
-
-Artefak segmentasi akan disimpan ke folder `artifacts/segmentation/`:
-
-- `customer_segmentation_pipeline.joblib`
-- `customer_clusters.csv`
-- `cluster_summary.csv`
-- `segmentation_metrics.json`
-
 ## Bagaimana proses klasifikasi bekerja
 
 1. Data historis dibagi menjadi fitur dan label.
@@ -103,8 +91,8 @@ Artefak segmentasi akan disimpan ke folder `artifacts/segmentation/`:
 	- `0` = pelanggan tidak churn
 3. Model hanya melihat fitur pelanggan, bukan kolom `churned`.
 4. Data dibagi menjadi **80% training** dan **20% testing** secara stratified.
-5. Logistic Regression dipakai sebagai baseline, lalu XGBoost sebagai model utama.
-6. SMOTE diterapkan pada data training untuk membantu menangani kelas yang tidak seimbang.
+5. SMOTE diterapkan pada data training untuk membantu menangani kelas yang tidak seimbang.
+6. XGBoost dan CatBoost dilatih pada data training untuk menghasilkan probabilitas churn.
 7. Hasil prediksi berupa probabilitas churn dan label prediksi berdasarkan threshold.
 
 ## Tentang filter dashboard
@@ -130,11 +118,16 @@ Dashboard menyediakan penjelasan ringkas yang bisa diunduh sebagai CSV, berisi:
 streamlit run app.py
 ```
 
+## Struktur halaman dashboard
+
+- `Predict` untuk user umum yang ingin memasukkan data customer secara cepat dan langsung melihat risiko churn.
+- `Advanced Analysis` untuk user analitis yang ingin memakai filter sidebar, membandingkan model, dan membaca SHAP per customer.
+
 ## Fitur dashboard
 
 - Filter pelanggan berdasarkan plan, kontrak, tenure, revenue, login, dan NPS
 - Peringkat pelanggan dengan risiko churn tertinggi
-- Perbandingan performa Logistic Regression vs XGBoost
+- Perbandingan performa XGBoost vs CatBoost
 - Ringkasan SHAP global dan alasan per pelanggan
 - Penjelasan global dan lokal berbasis SHAP
 - Download explanation CSV

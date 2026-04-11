@@ -12,8 +12,8 @@ from xgboost import XGBClassifier
 from src.churn_pipeline import (
     ARTIFACT_DIR,
     DATA_PATH,
-    build_logistic_pipeline,
     build_imbalance_aware_pipeline,
+    build_catboost_pipeline,
     build_xgb_pipeline,
     detect_feature_types,
     evaluate_model,
@@ -123,17 +123,17 @@ def main() -> None:
 
     print(f"Selected features ({len(selected_features)}): {selected_features}")
 
-    logistic_pipeline = build_logistic_pipeline(selected_numeric_features, selected_categorical_features)
     xgb_pipeline = build_xgb_pipeline(selected_numeric_features, selected_categorical_features)
-
-    print("Training Logistic Regression baseline...")
-    logistic_pipeline.fit(x_train, y_train)
+    catboost_pipeline = build_catboost_pipeline(selected_numeric_features, selected_categorical_features)
 
     print("Training XGBoost model...")
     xgb_pipeline.fit(x_train, y_train)
 
-    logistic_metrics = evaluate_model(logistic_pipeline, x_test, y_test)
+    print("Training CatBoost model...")
+    catboost_pipeline.fit(x_train, y_train)
+
     xgb_metrics = evaluate_model(xgb_pipeline, x_test, y_test)
+    catboost_metrics = evaluate_model(catboost_pipeline, x_test, y_test)
 
     feature_names = get_feature_names(xgb_pipeline)
 
@@ -141,21 +141,21 @@ def main() -> None:
         {
             "customer_id": dataset.loc[x_test.index, "customer_id"],
             "actual_churn": y_test.values,
-            "logistic_probability": logistic_pipeline.predict_proba(x_test)[:, 1],
             "xgb_probability": xgb_pipeline.predict_proba(x_test)[:, 1],
+            "catboost_probability": catboost_pipeline.predict_proba(x_test)[:, 1],
         }
     )
-    test_predictions["logistic_predicted"] = (test_predictions["logistic_probability"] >= 0.5).astype(int)
     test_predictions["xgb_predicted"] = (test_predictions["xgb_probability"] >= 0.5).astype(int)
+    test_predictions["catboost_predicted"] = (test_predictions["catboost_probability"] >= 0.5).astype(int)
 
     ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
-    save_artifact(logistic_pipeline, ARTIFACT_DIR / "logistic_pipeline.joblib")
     save_artifact(xgb_pipeline, ARTIFACT_DIR / "xgb_pipeline.joblib")
+    save_artifact(catboost_pipeline, ARTIFACT_DIR / "catboost_pipeline.joblib")
     test_predictions.to_csv(ARTIFACT_DIR / "test_predictions.csv", index=False)
 
     metrics = {
-        "logistic_regression": logistic_metrics,
         "xgboost": xgb_metrics,
+        "catboost": catboost_metrics,
         "feature_names": feature_names,
         "selected_features": selected_features,
         "feature_columns": {
@@ -177,10 +177,7 @@ def main() -> None:
     selected_importance_frame.to_csv(ARTIFACT_DIR / "feature_selection_summary.csv", index=False)
 
     print("\n=== Model Comparison ===")
-    for name, values in (
-        ("Logistic Regression", logistic_metrics),
-        ("XGBoost", xgb_metrics),
-    ):
+    for name, values in (("XGBoost", xgb_metrics), ("CatBoost", catboost_metrics)):
         print(f"\n{name}")
         for metric_name, metric_value in values.items():
             if metric_name == "confusion_matrix":
