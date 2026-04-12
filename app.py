@@ -639,6 +639,9 @@ def render_customer_navigator(customer_ids: list[str]) -> str:
     if select_key not in st.session_state:
         st.session_state[select_key] = customer_ids[0]
 
+    if st.session_state[select_key] not in customer_ids:
+        st.session_state[select_key] = customer_ids[0]
+
     st.session_state[index_key] = int(np.clip(customer_ids.index(st.session_state[select_key]), 0, len(customer_ids) - 1))
 
     nav_left, nav_center, nav_right = st.columns([1, 2, 1])
@@ -983,7 +986,7 @@ def render_predict_page(data: pd.DataFrame, assets: AppAssets, selected_features
         """
         <div class="hero">
             <h1>Customer Churn Quick Prediction</h1>
-            <p>Masukkan profil customer untuk melihat risiko churn secara cepat. Hasil XGBoost dan CatBoost ditampilkan berdampingan.</p>
+            <p>Prediksi cepat untuk customer baru atau customer yang sudah ada di data.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -997,7 +1000,7 @@ def render_predict_page(data: pd.DataFrame, assets: AppAssets, selected_features
     }
 
     st.markdown(
-        '<div class="dashboard-note">Halaman ini ditujukan untuk user umum. Isi form customer, klik prediksi, lalu lihat hasil risiko dari XGBoost dan CatBoost tanpa perlu menggeser banyak filter.</div>',
+        '<div class="dashboard-note">Pilih mode yang sesuai: input manual atau customer existing.</div>',
         unsafe_allow_html=True,
     )
     mode = st.radio("Predict mode", ["Predict Input", "Existing Customer"], horizontal=True, index=0)
@@ -1008,7 +1011,7 @@ def render_predict_page(data: pd.DataFrame, assets: AppAssets, selected_features
             form_values: dict[str, Any] = {}
 
             with left_col:
-                st.markdown("##### Profil & Kontrak")
+                st.markdown("##### Profil")
                 if "tenure_months" in selected_features:
                     config = get_numeric_field_config(data, "tenure_months", defaults)
                     form_values["tenure_months"] = st.number_input("Tenure (months)", **build_number_input_kwargs(config))
@@ -1024,7 +1027,7 @@ def render_predict_page(data: pd.DataFrame, assets: AppAssets, selected_features
                     form_values["monthly_usage_hrs"] = st.number_input("Monthly Usage Hours", **build_number_input_kwargs(config))
 
             with right_col:
-                st.markdown("##### Aktivitas & Risiko")
+                st.markdown("##### Aktivitas")
                 if "last_login_days_ago" in selected_features:
                     config = get_numeric_field_config(data, "last_login_days_ago", defaults)
                     form_values["last_login_days_ago"] = st.number_input("Days Since Last Login", **build_number_input_kwargs(config))
@@ -1045,28 +1048,28 @@ def render_predict_page(data: pd.DataFrame, assets: AppAssets, selected_features
                     config = get_numeric_field_config(data, "payment_delay_count", defaults)
                     form_values["payment_delay_count"] = st.number_input("Payment Delay Count", **build_number_input_kwargs(config))
 
-            st.caption("Numeric input boleh sedikit di luar rentang data training, tetapi hasil prediksi bisa kurang stabil jika terlalu ekstrem.")
+            st.caption("Nilai di luar rentang training tetap bisa diproses, tetapi hasilnya bisa kurang stabil.")
             submitted = st.form_submit_button("Hitung Risiko", use_container_width=True)
 
         if not submitted:
-            st.info("Isi form di atas lalu klik Hitung Risiko untuk melihat hasil prediksi.")
+            st.info("Isi form lalu klik Hitung Risiko.")
             return
 
         input_frame = build_manual_input_row(data, selected_features, form_values)
         input_frame.insert(0, ID_COLUMN, "SIMULASI-001")
         render_single_prediction_result(input_frame, data, assets, selected_features, selected_model_name, threshold)
         st.markdown(
-            '<div class="dashboard-note">Gunakan page ini untuk simulasi cepat. Jika ingin menyaring data historis, membandingkan metrik model, dan melihat customer navigator SHAP, pindah ke Advanced Analysis.</div>',
+            '<div class="dashboard-note">Mode ini untuk simulasi cepat. Advanced Analysis dipakai untuk eksplorasi data.</div>',
             unsafe_allow_html=True,
         )
         return
 
     customer_ids = data[ID_COLUMN].astype(str).tolist()
     selected_customer_id = st.selectbox(
-        "Customer ID",
+        "Existing customer",
         options=customer_ids,
         index=0,
-        help="Cari atau pilih customer yang sudah ada di dataset untuk dicek risikonya.",
+        help="Pilih customer yang sudah ada untuk dicek risikonya.",
     )
 
     customer_row = data.loc[data[ID_COLUMN].astype(str) == str(selected_customer_id)].head(1).copy()
@@ -1074,20 +1077,20 @@ def render_predict_page(data: pd.DataFrame, assets: AppAssets, selected_features
         st.warning("Customer ID tidak ditemukan di dataset saat ini.")
         return
 
-    st.markdown("##### Detail Profil Customer")
+    st.markdown("##### Customer Summary")
     profile_cols = st.columns(3)
     profile = customer_row.iloc[0]
     with profile_cols[0]:
-        st.metric("Customer ID", str(profile[ID_COLUMN]))
-        st.metric("Plan Type", str(profile.get("plan_type", "-")))
+        st.metric("ID", str(profile[ID_COLUMN]))
+        st.metric("Plan", str(profile.get("plan_type", "-")))
     with profile_cols[1]:
-        st.metric("Contract Type", str(profile.get("contract_type", "-")))
+        st.metric("Contract", str(profile.get("contract_type", "-")))
         st.metric("Tenure", f"{profile.get('tenure_months', 0)} months")
     with profile_cols[2]:
-        st.metric("Monthly Revenue", f"{float(profile.get('monthly_revenue', 0.0)):.2f}")
+        st.metric("Revenue", f"{float(profile.get('monthly_revenue', 0.0)):.2f}")
         st.metric("NPS", str(profile.get("nps_score", "-")))
 
-    with st.expander("View full customer profile", expanded=False):
+    with st.expander("Full profile", expanded=False):
         st.dataframe(customer_row.T.rename(columns={customer_row.index[0]: "value"}), use_container_width=True)
 
     if st.button("Check Risk", use_container_width=True):
@@ -1188,8 +1191,10 @@ def render_advanced_analysis_page(
         "churn_probability",
         "risk_flag",
     ]
+    scored_display = scored[display_columns].reset_index(drop=True).copy()
+    scored_display.insert(0, "Rank", range(1, len(scored_display) + 1))
     st.dataframe(
-        scored[display_columns].style.format(
+        scored_display.style.format(
             {
                 "monthly_revenue": "{:.2f}",
                 "churn_probability": "{:.2%}",
@@ -1197,6 +1202,7 @@ def render_advanced_analysis_page(
         ),
         use_container_width=True,
         height=380,
+        hide_index=True,
     )
 
     st.download_button(
