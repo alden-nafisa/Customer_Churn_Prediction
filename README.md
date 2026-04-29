@@ -1,11 +1,14 @@
 # Customer Churn Prediction with XGBoost, SHAP, and Streamlit
 
-Proyek ini membangun sistem peringatan dini churn pelanggan untuk perusahaan SaaS dengan:
+Proyek ini membangun sistem peringatan dini churn pelanggan untuk perusahaan SaaS dengan arsitektur yang sekarang difokuskan ke Supabase dan dataset `churn_analysis_datasets` sebagai sumber utama.
 
 - **Main model:** XGBoost
 - **Comparator model:** CatBoost
 - **Explainability:** SHAP
 - **Dashboard:** Streamlit
+- **Primary cloud database:** Supabase
+- **Backend API:** FastAPI
+- **Frontend terpisah:** Next.js
 
 ## Metode yang dipakai
 
@@ -15,6 +18,7 @@ Proyek ini membangun sistem peringatan dini churn pelanggan untuk perusahaan Saa
 
 ### Data preparation
 - Prapemrosesan data dilakukan melalui imputasi, encoding kategorikal, scaling fitur numerik, dan SMOTE pada data training churn yang imbalance.
+- Schema model mengikuti fitur kanonik hasil agregasi dari `churn_analysis_datasets`.
 
 ### NLP
 - Sentiment analysis memakai komentar sebagai input dan label sentimen dibentuk otomatis dari teks.
@@ -27,15 +31,47 @@ Proyek ini membangun sistem peringatan dini churn pelanggan untuk perusahaan Saa
 
 ## Struktur
 
-- `customers_dataset_tidied.xlsx` — data pelanggan historis yang lebih rapi
+- `churn_analysis_datasets/` — sumber utama data churn SaaS untuk training/testing dan simulasi prediksi
 - `youtube_chat_5_menit_cleaned.csv` — dataset komentar live chat yang sudah dirapikan untuk eksperimen NLP
 - `train_model.py` — melatih XGBoost dan CatBoost serta menyimpan artefak
 - `train_sentiment_model.py` — melatih model sentiment analysis untuk komentar live chat
 - `app.py` — dashboard interaktif
+- `backend/` — FastAPI service untuk prediction API dan metadata plan
+- `frontend/` — aplikasi Next.js yang memanggil API FastAPI
 - `src/churn_pipeline.py` — utilitas pemodelan
 - `src/supabase_config.py` — loader konfigurasi Supabase dari environment
 - `.env.example` — template variabel environment Supabase
 - `artifacts/` — model, metrik, dan output evaluasi
+
+## Arsitektur data baru
+
+Sistem sekarang memakai satu schema fitur kanonik yang dibentuk dari `churn_analysis_datasets` agar training, testing, dan input prediksi tetap konsisten:
+
+| Fitur kanonik | Sumber di churn_analysis_datasets | Alasan dipilih |
+|---|---|---|
+| `plan_type` | `customer_accounts.plan_type` | Segmentasi paket sangat kuat memengaruhi churn. |
+| `contract_type` | `customer_accounts.contract_type` | Kontrak bulanan vs tahunan berkaitan langsung dengan retensi. |
+| `tenure_months` | turunan dari `subscription_date` dan `unsubscribed_date` | Lama berlangganan adalah indikator loyalitas. |
+| `total_users` | `customer_accounts.total_users` | Ukuran akun memengaruhi switching cost. |
+| `monthly_usage_hrs` | `monthly_usage_metrics.monthly_usage_hrs` | Menangkap intensitas penggunaan. |
+| `feature_adoption_pct` | `monthly_usage_metrics.feature_adoption_pct` | Mengukur kedalaman adopsi produk. |
+| `last_login_days_ago` | turunan dari `monthly_usage_metrics.last_login_date` | Aktivitas terakhir adalah sinyal churn yang kuat. |
+| `support_tickets_last_90d` | agregasi `support_tickets` 90 hari | Friksi support sering mendahului churn. |
+
+Fitur tambahan yang boleh dipakai bila tersedia:
+
+| Fitur tambahan | Sumber di churn_analysis_datasets | Catatan |
+|---|---|---|
+| `nps_score` | `nps_surveys.nps_score` | Mirip konsepnya, tetapi tidak identik. |
+| `payment_delay_count` | agregasi `billing_data.record_type = dunning` | Tidak wajib, tapi berguna untuk menangkap friksi pembayaran. |
+
+## Flow sistem yang disarankan
+
+1. `churn_analysis_datasets` masuk ke Supabase sebagai raw tables.
+2. Dari raw tables dibuat feature view / feature table kanonik.
+3. Model training dan testing memakai feature table kanonik itu.
+4. Aplikasi menampilkan form input berdasarkan fitur kanonik, bukan berdasarkan tabel mentah.
+5. Nilai tidak harus sama dengan data mentah, yang harus sama adalah makna fiturnya.
 
 ## Instalasi
 
@@ -100,7 +136,8 @@ Ringkasan komentar akan disimpan ke `artifacts/nlp/`:
 Filter di dashboard dipakai untuk memilih subset pelanggan yang ingin dianalisis.
 
 - Filter utama: plan type, contract type, dan status churn aktual.
-- Filter lanjutan: tenure, revenue, last login, NPS, feature adoption, support tickets, dan payment delay.
+- Filter lanjutan: tenure, total users, monthly usage, feature adoption, last login, dan support tickets.
+- Fitur tambahan seperti NPS dan payment delay dapat dipakai bila memang disiapkan di feature view.
 
 Jadi filter itu **bukan bagian dari training model**, melainkan untuk memudahkan analisis bisnis.
 
@@ -118,6 +155,47 @@ Dashboard menyediakan penjelasan ringkas yang bisa diunduh sebagai CSV, berisi:
 streamlit run app.py
 ```
 
+## Menjalankan backend FastAPI
+
+```bash
+pip install -r backend/requirements.txt
+uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Endpoint utama:
+
+- `GET /health`
+- `GET /api/plans`
+- `POST /api/predict`
+
+## Menjalankan frontend Next.js
+
+Masuk ke folder `frontend/`, lalu install dependency dan jalankan dev server:
+
+```bash
+npm install
+npm run dev
+```
+
+Set `NEXT_PUBLIC_API_BASE_URL` ke URL backend FastAPI, misalnya `http://127.0.0.1:8000` untuk lokal.
+
+## Deployment
+
+### Backend di Render
+
+- Gunakan [render.yaml](render.yaml) sebagai blueprint service.
+- Set `FRONTEND_ORIGINS` ke origin frontend Vercel Anda, misalnya `https://your-app.vercel.app`.
+
+### Frontend di Vercel
+
+- Deploy folder `frontend/` sebagai project Next.js.
+- Set environment variable `NEXT_PUBLIC_API_BASE_URL` ke URL backend Render, misalnya `https://customer-churn-api.onrender.com`.
+
+### Catatan integrasi
+
+- Frontend hanya memanggil `GET /api/plans` dan `POST /api/predict`.
+- Backend tetap memakai artefak model yang sudah ada di `artifacts/plan_models/`.
+
 ## Struktur halaman dashboard
 
 - `Predict` untuk user umum yang ingin memasukkan data customer secara cepat dan langsung melihat risiko churn.
@@ -131,3 +209,9 @@ streamlit run app.py
 - Ringkasan SHAP global dan alasan per pelanggan
 - Penjelasan global dan lokal berbasis SHAP
 - Download explanation CSV
+
+## Catatan implementasi Supabase
+
+- Data utama sekarang diarahkan ke Supabase, bukan ke database lokal.
+- Tabel dan view yang diekspos ke client sebaiknya diberi RLS.
+- Schema fitur untuk training/testing harus tetap sama dari raw tables ke feature view.

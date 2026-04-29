@@ -10,11 +10,12 @@ import plotly.express as px
 import plotly.graph_objects as go
 import shap
 import streamlit as st
-
 from src.churn_pipeline import (
     ARTIFACT_DIR,
     DATA_PATH,
     ID_COLUMN,
+    PLAN_TYPES,
+    get_plan_slug,
     load_artifact,
     load_dataset,
     transform_features,
@@ -42,6 +43,7 @@ class MetricsBundle(TypedDict):
     feature_names: list[str]
     selected_features: list[str]
     feature_columns: dict[str, list[str]]
+    training_strategy: dict[str, Any]
 
 
 class AppAssets(TypedDict):
@@ -51,6 +53,7 @@ class AppAssets(TypedDict):
     xgb_explainer: Any
     catboost_explainer: Any
     selected_features: list[str]
+    plan_type: str
 
 
 class NLPAssets(TypedDict):
@@ -58,117 +61,6 @@ class NLPAssets(TypedDict):
     sentiment_test_predictions: pd.DataFrame
     session_summary: dict[str, Any]
     session_summary_text: str
-
-st.set_page_config(
-    page_title="Customer Churn Early Warning System",
-    page_icon="📉",
-    layout="wide",
-)
-
-
-@st.cache_resource
-def load_assets() -> AppAssets:
-    xgb_pipeline = load_artifact(ARTIFACT_DIR / "xgb_pipeline.joblib")
-    catboost_pipeline = load_artifact(ARTIFACT_DIR / "catboost_pipeline.joblib")
-    metrics = json.loads((ARTIFACT_DIR / "metrics.json").read_text(encoding="utf-8"))
-    return {
-        "xgb_pipeline": xgb_pipeline,
-        "catboost_pipeline": catboost_pipeline,
-        "metrics": metrics,
-        "xgb_explainer": shap.TreeExplainer(xgb_pipeline.named_steps["model"]),
-        "catboost_explainer": shap.TreeExplainer(catboost_pipeline.named_steps["model"]),
-        "selected_features": metrics.get("selected_features", []),
-    }
-
-
-@st.cache_data
-def load_source_data() -> pd.DataFrame:
-    return load_dataset(DATA_PATH)
-
-
-@st.cache_data
-def load_nlp_assets() -> NLPAssets:
-    sentiment_metrics_path = NLP_ARTIFACT_DIR / "sentiment_metrics.json"
-    sentiment_predictions_path = NLP_ARTIFACT_DIR / "sentiment_test_predictions.csv"
-    session_summary_path = NLP_ARTIFACT_DIR / "session_summary.json"
-    session_summary_text_path = NLP_ARTIFACT_DIR / "session_summary.txt"
-
-    sentiment_metrics = json.loads(sentiment_metrics_path.read_text(encoding="utf-8")) if sentiment_metrics_path.exists() else {}
-    sentiment_predictions = pd.read_csv(sentiment_predictions_path) if sentiment_predictions_path.exists() else pd.DataFrame()
-    session_summary = json.loads(session_summary_path.read_text(encoding="utf-8")) if session_summary_path.exists() else {}
-    session_summary_text = session_summary_text_path.read_text(encoding="utf-8") if session_summary_text_path.exists() else ""
-
-    return {
-        "sentiment_metrics": sentiment_metrics,
-        "sentiment_test_predictions": sentiment_predictions,
-        "session_summary": session_summary,
-        "session_summary_text": session_summary_text,
-    }
-
-
-def add_branding() -> None:
-    st.markdown(
-        """
-        <style>
-            .block-container { padding-top: 1.2rem; padding-bottom: 2rem; }
-            .hero {
-                background: linear-gradient(135deg, #0f172a 0%, #1d4ed8 55%, #06b6d4 100%);
-                color: white;
-                border-radius: 18px;
-                padding: 1.4rem 1.6rem;
-                margin-bottom: 1.25rem;
-                box-shadow: 0 10px 30px rgba(15, 23, 42, 0.25);
-            }
-            .hero h1 { margin: 0; font-size: 2rem; }
-            .hero p { margin: 0.35rem 0 0; opacity: 0.92; }
-            .kpi-card {
-                background: white;
-                border: 1px solid #e5e7eb;
-                border-radius: 16px;
-                padding: 1rem 1rem 0.85rem;
-                box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
-            }
-            .dashboard-note,
-            .dashboard-note p,
-            .dashboard-note li,
-            .dashboard-note span {
-                color: var(--text-color);
-                opacity: 1;
-            }
-            .dashboard-note {
-                background: var(--secondary-background-color);
-                border: 1px solid rgba(148, 163, 184, 0.28);
-                border-left: 4px solid #2563eb;
-                border-radius: 14px;
-                padding: 0.85rem 1rem;
-                margin: 0.9rem 0 1rem;
-                box-shadow: 0 4px 14px rgba(15, 23, 42, 0.04);
-            }
-            .dashboard-note strong,
-            .dashboard-note b {
-                color: var(--text-color);
-            }
-            .stCaption,
-            .stMarkdown p,
-            .stMarkdown li {
-                color: var(--text-color);
-                opacity: 1;
-            }
-            .stAlert {
-                color: var(--text-color);
-            }
-            .stSidebar .stCaption,
-            .stSidebar p,
-            .stSidebar li,
-            .stSidebar label,
-            .stSidebar span {
-                color: var(--text-color);
-                opacity: 1;
-            }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
 
 
 def init_auth_state() -> None:
@@ -178,73 +70,438 @@ def init_auth_state() -> None:
         st.session_state.auth_error = ""
 
 
-def authenticate_user(username: str, password: str) -> bool:
-    return username == AUTH_USERNAME and password == AUTH_PASSWORD
-
-
-def render_login_page() -> None:
+def add_branding() -> None:
     st.markdown(
         """
         <style>
-            .login-card {
-                background: var(--secondary-background-color);
-                border: 1px solid rgba(148, 163, 184, 0.28);
-                border-radius: 18px;
-                padding: 0;
-                box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
+            header[data-testid="stHeader"],
+            [data-testid="stToolbar"],
+            #MainMenu {
+                visibility: hidden !important;
+                display: none !important;
             }
-            .login-title {
-                font-size: 1.6rem;
-                font-weight: 700;
-                color: var(--text-color);
-                margin: 0;
-            }
-            .login-subtitle {
-                color: var(--text-color);
-                opacity: 0.82;
-                margin: 0.4rem 0 0.85rem;
-            }
-            .login-caption {
-                color: var(--text-color);
-                opacity: 0.75;
-                margin-top: 0.85rem;
-            }
-            .login-caption strong,
-            .login-caption b {
-                color: var(--text-color);
-                opacity: 1;
-            }
-            .stTextInput label,
-            .stTextInput p,
-            .stTextInput span {
-                color: var(--text-color) !important;
-                opacity: 1 !important;
-            }
-            .stTextInput input,
-            .stTextInput textarea {
-                color: var(--text-color) !important;
-            }
-            .stButton button {
-                border-radius: 12px;
-                font-weight: 600;
+            .stApp {
+                background: radial-gradient(circle at top, #f7fbff 0%, #eef4ff 42%, #e3eef8 100%);
             }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    left, center, right = st.columns([1, 1.5, 1])
-    with center:
-        st.markdown('<div class="login-card">', unsafe_allow_html=True)
-        st.markdown('<div class="login-title">Login to Dashboard</div>', unsafe_allow_html=True)
+
+st.set_page_config(
+    page_title="Customer Churn Early Warning System",
+    page_icon="📉",
+    layout="wide",
+)
+
+
+@st.cache_resource
+def load_assets(plan_type: str) -> AppAssets:
+    plan_slug = get_plan_slug(plan_type)
+    plan_dir = ARTIFACT_DIR / "plan_models" / plan_slug
+    metrics_path = ARTIFACT_DIR / "plan_model_metrics.json"
+    summary = json.loads(metrics_path.read_text(encoding="utf-8")) if metrics_path.exists() else {"plans": {}}
+    metrics = summary.get("plans", {}).get(plan_type, {})
+
+    xgb_pipeline = load_artifact(plan_dir / "xgb_pipeline.joblib")
+    catboost_pipeline = load_artifact(plan_dir / "catboost_pipeline.joblib")
+    return {
+        "xgb_pipeline": xgb_pipeline,
+        "catboost_pipeline": catboost_pipeline,
+        "metrics": metrics,
+        "xgb_explainer": shap.TreeExplainer(xgb_pipeline.named_steps["model"]),
+        "catboost_explainer": shap.TreeExplainer(catboost_pipeline.named_steps["model"]),
+        "selected_features": metrics.get("selected_features", []),
+        "plan_type": plan_type,
+    }
+
+
+def render_login_page() -> None:
+    st.markdown(
+        """
+        <style>
+            :root {
+                --brand-blue: #2f6ea8;
+                --brand-blue-dark: #245582;
+                --brand-blue-mid: #3d82bf;
+                --brand-blue-light: #72aee0;
+                --brand-blue-pale: #e8f2fb;
+            }
+            .stApp {
+                background: radial-gradient(circle at top, #f7fbff 0%, var(--brand-blue-pale) 42%, #e3eef8 100%);
+            }
+            header[data-testid="stHeader"],
+            [data-testid="stToolbar"],
+            #MainMenu {
+                visibility: hidden !important;
+                display: none !important;
+            }
+            .login-page {
+                padding-top: 2.2rem;
+                padding-bottom: 3rem;
+            }
+            .login-shell {
+                width: min(1180px, calc(100vw - 5rem));
+                max-width: 1180px;
+                margin: 0 auto;
+                background: white;
+                border-radius: 28px;
+                overflow: hidden;
+                box-shadow: 0 26px 60px rgba(15, 23, 42, 0.18), 0 2px 0 rgba(255, 255, 255, 0.55) inset;
+                border: 1px solid rgba(15, 23, 42, 0.06);
+            }
+            div[data-testid="column"] {
+                padding: 0 !important;
+            }
+            .login-left {
+                position: relative;
+                min-height: 560px;
+                padding: 2rem;
+                background:
+                    radial-gradient(circle at 20% 20%, rgba(255,255,255,0.25) 0 10px, transparent 11px),
+                    radial-gradient(circle at 80% 12%, rgba(255,255,255,0.18) 0 14px, transparent 15px),
+                    radial-gradient(circle at 15% 78%, rgba(255,255,255,0.15) 0 18px, transparent 19px),
+                    linear-gradient(135deg, var(--brand-blue-dark) 0%, var(--brand-blue) 35%, var(--brand-blue-mid) 68%, var(--brand-blue-light) 100%);
+                color: white;
+                isolation: isolate;
+                overflow: hidden;
+            }
+            .login-left::before,
+            .login-left::after {
+                content: "";
+                position: absolute;
+                inset: auto;
+                border-radius: 999px;
+                pointer-events: none;
+            }
+            .login-left::before {
+                width: 340px;
+                height: 340px;
+                top: -110px;
+                right: -110px;
+                background: radial-gradient(circle, rgba(255,255,255,0.26) 0%, rgba(255,255,255,0.04) 55%, transparent 70%);
+                animation: floatGlow 10s ease-in-out infinite;
+            }
+            .login-left::after {
+                width: 260px;
+                height: 260px;
+                left: -90px;
+                bottom: -100px;
+                background: radial-gradient(circle, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0.05) 60%, transparent 72%);
+                animation: floatGlow 12s ease-in-out infinite reverse;
+            }
+            .blue-grid {
+                position: absolute;
+                inset: 0;
+                background-image:
+                    linear-gradient(rgba(255,255,255,0.08) 1px, transparent 1px),
+                    linear-gradient(90deg, rgba(255,255,255,0.08) 1px, transparent 1px);
+                background-size: 42px 42px;
+                opacity: 0.45;
+                mask-image: linear-gradient(180deg, rgba(0,0,0,0.85), rgba(0,0,0,0.3));
+                animation: gridDrift 18s linear infinite, gridPulse 6s ease-in-out infinite;
+            }
+            .wave {
+                position: absolute;
+                left: -22%;
+                width: 144%;
+                height: 220px;
+                border-radius: 46% 54% 45% 55% / 58% 42% 58% 42%;
+                filter: blur(6px);
+                opacity: 0.9;
+                mix-blend-mode: screen;
+                z-index: 1;
+                will-change: transform, opacity, background-position;
+            }
+            .wave.one {
+                top: 10%;
+                background: linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.24), rgba(255,255,255,0.02));
+                background-size: 200% 100%;
+                animation: waveOne 9s ease-in-out infinite;
+            }
+            .wave.two {
+                top: 26%;
+                background: linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.16), rgba(255,255,255,0.02));
+                background-size: 220% 100%;
+                animation: waveTwo 11s ease-in-out infinite;
+            }
+            .wave.three {
+                bottom: 9%;
+                background: linear-gradient(90deg, rgba(29, 78, 216, 0.28), rgba(255,255,255,0.16), rgba(56, 189, 248, 0.26));
+                background-size: 240% 100%;
+                animation: waveThree 13s ease-in-out infinite;
+            }
+            .orbit {
+                position: absolute;
+                border-radius: 50%;
+                border: 1px solid rgba(255,255,255,0.28);
+                box-shadow: 0 0 24px rgba(255,255,255,0.2) inset;
+                animation: orbitPulse 8s ease-in-out infinite;
+                z-index: 1;
+            }
+            .orbit.one { width: 82px; height: 82px; left: 24px; top: 78px; }
+            .orbit.two { width: 120px; height: 120px; right: 40px; top: 34px; animation-delay: -2s; }
+            .orbit.three { width: 68px; height: 68px; left: 54%; top: 54%; animation-delay: -4s; }
+            .login-brand {
+                position: relative;
+                z-index: 2;
+                display: flex;
+                align-items: center;
+                gap: 0.6rem;
+                font-weight: 700;
+                letter-spacing: 0.08em;
+                font-size: 0.8rem;
+                text-transform: uppercase;
+                opacity: 0.96;
+            }
+            .brand-mark {
+                width: 34px;
+                height: 34px;
+                border-radius: 999px;
+                border: 2px solid rgba(255,255,255,0.9);
+                display: grid;
+                place-items: center;
+                font-size: 0.9rem;
+                box-shadow: 0 0 0 10px rgba(255,255,255,0.08);
+            }
+            .login-copy {
+                position: relative;
+                z-index: 2;
+                margin-top: 7rem;
+                max-width: 420px;
+            }
+            .login-copy .eyebrow {
+                font-size: 1rem;
+                opacity: 0.9;
+                margin-bottom: 0.5rem;
+            }
+            .login-copy h1 {
+                font-size: clamp(2.5rem, 4vw, 4.4rem);
+                line-height: 0.94;
+                margin: 0;
+                letter-spacing: -0.04em;
+                text-transform: uppercase;
+            }
+            .login-copy .divider {
+                width: 56px;
+                height: 4px;
+                border-radius: 999px;
+                background: rgba(255,255,255,0.95);
+                margin: 1rem 0 1.1rem;
+            }
+            .login-copy p {
+                margin: 0;
+                max-width: 330px;
+                line-height: 1.55;
+                opacity: 0.9;
+                font-size: 0.95rem;
+            }
+            .login-right {
+                min-height: 560px;
+            }
+            .login-title {
+                font-size: 1.7rem;
+                font-weight: 800;
+                color: #2563eb;
+                margin: 0;
+                letter-spacing: -0.03em;
+            }
+            .login-subtitle {
+                color: #6b7280;
+                margin: 0.45rem 0 1.1rem;
+                line-height: 1.55;
+                font-size: 0.95rem;
+            }
+            .login-chip-row {
+                display: flex;
+                gap: 0.75rem;
+                align-items: center;
+                margin: 1.2rem 0 1.45rem;
+                color: #6b7280;
+                font-size: 0.88rem;
+            }
+            .login-chip {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                width: 20px;
+                height: 20px;
+                border-radius: 999px;
+                background: #e5e7eb;
+                color: #6b7280;
+                font-weight: 700;
+            }
+            .login-caption {
+                color: #6b7280;
+                margin-top: 0.85rem;
+                font-size: 0.9rem;
+            }
+            .login-caption strong,
+            .login-caption b {
+                color: #0f172a;
+            }
+            .stForm {
+                background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+                border-radius: 28px;
+                padding: 3rem 3rem 2.6rem;
+                box-shadow: 0 26px 60px rgba(15, 23, 42, 0.12), 0 1px 0 rgba(255, 255, 255, 0.8) inset;
+                border: 1px solid rgba(15, 23, 42, 0.06);
+                margin-top: 0;
+            }
+            .stTextInput label,
+            .stTextInput p,
+            .stTextInput span {
+                color: #6b7280 !important;
+                opacity: 1 !important;
+            }
+            .stTextInput input,
+            .stTextInput textarea {
+                color: #0f172a !important;
+                background: white !important;
+                border: 1px solid #d1d5db !important;
+                border-left: 4px solid #2563eb !important;
+                border-radius: 10px !important;
+                box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.04) !important;
+            }
+            div[data-testid="stTextInput"] [data-baseweb="base-input"],
+            div[data-testid="stTextInput"] [data-baseweb="base-input"] > div,
+            div[data-testid="stTextInput"] [data-baseweb="input"] {
+                background: white !important;
+                box-shadow: none !important;
+                border-color: #d1d5db !important;
+            }
+            div[data-testid="stTextInput"] [data-baseweb="input"] input,
+            div[data-testid="stTextInput"] [data-baseweb="base-input"] input {
+                background: white !important;
+                color: #0f172a !important;
+                -webkit-text-fill-color: #0f172a !important;
+                opacity: 1 !important;
+            }
+            div[data-testid="stTextInput"] [data-baseweb="base-input"] button,
+            div[data-testid="stTextInput"] [data-baseweb="base-input"] button:hover,
+            div[data-testid="stTextInput"] [data-baseweb="base-input"] button:active,
+            div[data-testid="stTextInput"] [data-baseweb="base-input"] button:focus,
+            div[data-testid="stTextInput"] button,
+            div[data-testid="stTextInput"] button:hover,
+            div[data-testid="stTextInput"] button:active,
+            div[data-testid="stTextInput"] button:focus {
+                background: #f3f4f6 !important;
+                color: #6b7280 !important;
+                fill: #6b7280 !important;
+                stroke: #6b7280 !important;
+                border-color: #d1d5db !important;
+                box-shadow: none !important;
+            }
+            div[data-testid="stTextInput"] button svg,
+            div[data-testid="stTextInput"] button svg * {
+                fill: #6b7280 !important;
+                stroke: #6b7280 !important;
+            }
+            div[data-testid="stForm"] button,
+            div[data-testid="stForm"] button:hover,
+            div[data-testid="stForm"] button:active,
+            div[data-testid="stForm"] button:focus,
+            div[data-testid="stForm"] button[kind="primary"],
+            div[data-testid="stForm"] button[kind="primary"]:hover,
+            div[data-testid="stForm"] button[kind="primary"]:active,
+            div[data-testid="stForm"] button[kind="primary"]:focus {
+                border-radius: 999px;
+                font-weight: 700;
+                background: #1f7aec !important;
+                color: #ffffff !important;
+                border: 1px solid #1f7aec !important;
+                box-shadow: 0 14px 24px rgba(31, 122, 236, 0.22) !important;
+                transition: transform 0.2s ease, box-shadow 0.2s ease;
+            }
+            div[data-testid="stForm"] button:hover,
+            div[data-testid="stForm"] button[kind="primary"]:hover {
+                transform: translateY(-1px);
+                box-shadow: 0 18px 28px rgba(31, 122, 236, 0.28) !important;
+            }
+            @keyframes floatGlow {
+                0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+                50% { transform: translate3d(0, 18px, 0) scale(1.03); }
+            }
+            @keyframes waveOne {
+                0%, 100% { transform: translate(-2%, 0px) scaleX(1.01) scaleY(1.00) rotate(-4deg); background-position: 0% 50%; opacity: 0.82; }
+                50% { transform: translate(4%, 10px) scaleX(1.05) scaleY(1.08) rotate(-2deg); background-position: 100% 50%; opacity: 0.98; }
+            }
+            @keyframes waveTwo {
+                0%, 100% { transform: translate(0, 0px) scaleX(1.02) scaleY(1.00) rotate(7deg); background-position: 100% 50%; opacity: 0.72; }
+                50% { transform: translate(-5%, -12px) scaleX(1.08) scaleY(1.1) rotate(10deg); background-position: 0% 50%; opacity: 0.92; }
+            }
+            @keyframes waveThree {
+                0%, 100% { transform: translate(0, 0px) scaleX(1.01) scaleY(1.00) rotate(-2deg); background-position: 0% 50%; opacity: 0.7; }
+                50% { transform: translate(6%, -8px) scaleX(1.08) scaleY(1.12) rotate(2deg); background-position: 100% 50%; opacity: 0.95; }
+            }
+            @keyframes orbitPulse {
+                0%, 100% { transform: scale(1); opacity: 0.45; }
+                50% { transform: scale(1.08); opacity: 0.8; }
+            }
+            @keyframes gridDrift {
+                0% { background-position: 0 0; }
+                100% { background-position: 84px 42px; }
+            }
+            @keyframes gridPulse {
+                0%, 100% { opacity: 0.34; }
+                50% { opacity: 0.56; }
+            }
+            @media (max-width: 900px) {
+                .login-shell {
+                    width: min(100vw - 1.5rem, 1180px);
+                }
+                .login-left {
+                    min-height: 360px;
+                }
+                .login-copy {
+                    margin-top: 6rem;
+                }
+                .login-right {
+                    padding: 2rem 1.5rem 2.2rem;
+                    min-height: auto;
+                }
+            }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown('<div class="login-page">', unsafe_allow_html=True)
+    st.markdown('<div class="login-shell">', unsafe_allow_html=True)
+    left_col, right_col = st.columns([1.0, 1.0])
+
+    with left_col:
         st.markdown(
-            '<div class="login-subtitle">Masukkan username dan password yang valid untuk membuka dashboard analisis churn.</div>',
+            """
+            <div class="login-left">
+                <div class="blue-grid"></div>
+                <div class="wave one"></div>
+                <div class="wave two"></div>
+                <div class="wave three"></div>
+                <div class="orbit one"></div>
+                <div class="orbit two"></div>
+                <div class="orbit three"></div>
+                <div class="login-brand"><div class="brand-mark">◎</div><span>Company Name</span></div>
+                <div class="login-copy">
+                    <div class="eyebrow">Nice to see you again</div>
+                    <h1>WELCOME BACK</h1>
+                    <div class="divider"></div>
+                    <p>Masuk untuk membuka dashboard churn dengan tampilan yang lebih tenang, modern, dan fokus pada analisis.</p>
+                </div>
+            </div>
+            """,
             unsafe_allow_html=True,
         )
+
+    with right_col:
         with st.form("login_form", clear_on_submit=False):
-            username = st.text_input("Username")
-            password = st.text_input("Password", type="password")
-            submitted = st.form_submit_button("Login", use_container_width=True)
+            st.markdown('<div class="login-title">Login Account</div>', unsafe_allow_html=True)
+            st.markdown('<div class="login-subtitle">Masukkan username dan password yang valid untuk membuka dashboard analisis churn.</div>', unsafe_allow_html=True)
+            st.markdown('<div class="login-chip-row"><span class="login-chip">✓</span><span>Keep me signed in</span><span style="margin-left:auto; color:#6b7280; font-weight:600;">Already a member?</span></div>', unsafe_allow_html=True)
+            username = st.text_input("Email ID", placeholder="Admin123")
+            password = st.text_input("Password", type="password", placeholder="12345678")
+            submitted = st.form_submit_button("SUBSCRIBE", use_container_width=True)
 
         if submitted:
             if authenticate_user(username, password):
@@ -258,77 +515,13 @@ def render_login_page() -> None:
             st.error(st.session_state.auth_error)
 
         st.markdown(
-            f'<div class="login-caption">Credential demo: username {AUTH_USERNAME} dan password {AUTH_PASSWORD}.</div>',
+            f'<div class="login-caption">Credential demo: username <strong>{AUTH_USERNAME}</strong> dan password <strong>{AUTH_PASSWORD}</strong>.</div>',
             unsafe_allow_html=True,
         )
-        st.markdown('</div>', unsafe_allow_html=True)
 
-
-def render_logout_button() -> None:
-    st.sidebar.markdown("### Session")
-    st.sidebar.success(f"Logged in as {AUTH_USERNAME}")
-    if st.sidebar.button("Logout", use_container_width=True):
-        st.session_state.authenticated = False
-        st.session_state.auth_error = ""
-        st.rerun()
-
-
-def filter_data(frame: pd.DataFrame) -> pd.DataFrame:
-    st.sidebar.header("Filter Data")
-
-    plan_types = sorted(frame["plan_type"].unique().tolist())
-    contract_types = sorted(frame["contract_type"].unique().tolist())
-    churn_filters = ["Semua", "Churn", "Tidak Churn"]
-
-    selected_plans = st.sidebar.multiselect("Plan Type", plan_types, default=plan_types)
-    selected_contracts = st.sidebar.multiselect("Contract Type", contract_types, default=contract_types)
-    selected_churn_status = st.sidebar.radio("Actual churn status", churn_filters, index=0)
-
-    with st.sidebar.expander("Advanced filters", expanded=False):
-        tenure_min, tenure_max = int(frame["tenure_months"].min()), int(frame["tenure_months"].max())
-        revenue_min, revenue_max = float(frame["monthly_revenue"].min()), float(frame["monthly_revenue"].max())
-        login_min, login_max = int(frame["last_login_days_ago"].min()), int(frame["last_login_days_ago"].max())
-        nps_min, nps_max = int(frame["nps_score"].min()), int(frame["nps_score"].max())
-        feature_min, feature_max = float(frame["feature_adoption_pct"].min()), float(frame["feature_adoption_pct"].max())
-        tickets_min, tickets_max = int(frame["support_tickets_last_90d"].min()), int(frame["support_tickets_last_90d"].max())
-        payment_min, payment_max = int(frame["payment_delay_count"].min()), int(frame["payment_delay_count"].max())
-
-        tenure_range = st.slider("Tenure (months)", tenure_min, tenure_max, (tenure_min, tenure_max))
-        revenue_range = st.slider(
-            "Monthly Revenue",
-            min_value=float(revenue_min),
-            max_value=float(revenue_max),
-            value=(float(revenue_min), float(revenue_max)),
-        )
-        login_range = st.slider("Days Since Last Login", login_min, login_max, (login_min, login_max))
-        nps_range = st.slider("NPS Score", nps_min, nps_max, (nps_min, nps_max))
-        feature_range = st.slider(
-            "Feature Adoption %",
-            min_value=float(feature_min),
-            max_value=float(feature_max),
-            value=(float(feature_min), float(feature_max)),
-        )
-        tickets_range = st.slider("Support tickets / 90 days", tickets_min, tickets_max, (tickets_min, tickets_max))
-        payment_range = st.slider("Payment delay count", payment_min, payment_max, (payment_min, payment_max))
-
-    filtered = frame[
-        frame["plan_type"].isin(selected_plans)
-        & frame["contract_type"].isin(selected_contracts)
-        & frame["tenure_months"].between(*tenure_range)
-        & frame["monthly_revenue"].between(*revenue_range)
-        & frame["last_login_days_ago"].between(*login_range)
-        & frame["nps_score"].between(*nps_range)
-        & frame["feature_adoption_pct"].between(*feature_range)
-        & frame["support_tickets_last_90d"].between(*tickets_range)
-        & frame["payment_delay_count"].between(*payment_range)
-    ].copy()
-
-    if selected_churn_status == "Churn":
-        filtered = filtered[filtered[TARGET_COLUMN] == 1]
-    elif selected_churn_status == "Tidak Churn":
-        filtered = filtered[filtered[TARGET_COLUMN] == 0]
-
-    return filtered
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+    return
 
 
 def score_frame(pipeline, frame: pd.DataFrame, threshold: float, selected_features: list[str]) -> pd.DataFrame:
@@ -355,16 +548,23 @@ def kpi_cards(scored: pd.DataFrame, threshold: float) -> None:
 
     cols = st.columns(4)
     metrics = [
-        ("Customers in view", len(scored)),
-        ("High-risk customers", high_risk),
-        ("Average churn probability", f"{avg_prob:.2%}"),
-        ("Highest churn probability", f"{max_prob:.2%}"),
+        ("Customers in view", len(scored), "Filtered customer set"),
+        ("High-risk customers", high_risk, "Above current threshold"),
+        ("Average churn probability", f"{avg_prob:.2%}", "Mean risk across view"),
+        ("Highest churn probability", f"{max_prob:.2%}", "Top single risk score"),
     ]
-    for col, (label, value) in zip(cols, metrics, strict=False):
+    for col, (label, value, meta) in zip(cols, metrics, strict=False):
         with col:
-            st.markdown('<div class="kpi-card">', unsafe_allow_html=True)
-            st.metric(label, value)
-            st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown(
+                f'''
+                <div class="kpi-card">
+                    <div class="kpi-label">{label}</div>
+                    <div class="kpi-value">{value}</div>
+                    <div class="kpi-meta">{meta}</div>
+                </div>
+                ''',
+                unsafe_allow_html=True,
+            )
     st.caption(f"Median churn probability in the current view: {median_prob:.2%}")
 
 
@@ -373,7 +573,7 @@ def plot_risk_distribution(scored: pd.DataFrame, threshold: float) -> None:
         scored,
         x="churn_probability",
         nbins=24,
-        color_discrete_sequence=["#2563eb"],
+        color_discrete_sequence=["#111827"],
         title="Distribution of churn probability",
     )
     fig.add_vline(x=threshold, line_dash="dash", line_color="#ef4444", annotation_text="Threshold")
@@ -390,22 +590,24 @@ def plot_top_risks(scored: pd.DataFrame) -> None:
         y="customer_short",
         orientation="h",
         color="churn_probability",
-        color_continuous_scale="Reds",
+        color_continuous_scale="Greys",
         title="Top customers by churn probability",
     )
     fig.update_layout(height=450, margin=dict(l=10, r=10, t=55, b=10), coloraxis_showscale=False)
     st.plotly_chart(fig, use_container_width=True)
 
 
-def show_model_comparison(metrics: MetricsBundle) -> None:
+def show_model_comparison(metrics: MetricsBundle, plan_type: str) -> None:
     comparison = pd.DataFrame([
         {"model": "XGBoost", **metrics["xgboost"]},
         {"model": "CatBoost", **metrics["catboost"]},
     ])
     display = comparison[["model", "accuracy", "precision", "recall", "f1", "roc_auc", "pr_auc"]].copy()
     display.columns = ["Model", "Accuracy", "Precision", "Recall", "F1", "ROC AUC", "PR AUC"]
-    st.subheader("Model comparison")
-    st.dataframe(display.style.format({col: "{:.3f}" for col in display.columns[1:]}), use_container_width=True)
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.markdown(f'<div class="section-title">Model comparison - {plan_type}</div>', unsafe_allow_html=True)
+    st.dataframe(display.style.format({col: "{:.3f}" for col in display.columns[1:]}), use_container_width=True, height=220)
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 def derive_actions(scored: pd.DataFrame) -> list[str]:
@@ -511,7 +713,7 @@ def build_shap_summary(scored: pd.DataFrame, xgb_pipeline, explainer, selected_f
     return global_df, export_df
 
 
-def build_explanation_summary(scored: pd.DataFrame, assets: AppAssets, model_name: str, threshold: float) -> str:
+def build_explanation_summary(scored: pd.DataFrame, assets: AppAssets, model_name: str, threshold: float, plan_type: str) -> str:
     metrics_key = model_name.lower()
     model_metrics = assets["metrics"].get(metrics_key, assets["metrics"]["xgboost"])
 
@@ -521,6 +723,7 @@ def build_explanation_summary(scored: pd.DataFrame, assets: AppAssets, model_nam
     match_rate = float((scored["match_flag"] == "Cocok").mean()) if len(scored) else 0.0
 
     return f"""### Ringkasan Risiko
+- Plan model: {plan_type}
 - Model aktif: {model_name}
 - Threshold risiko: {threshold:.2f}
 - Pelanggan dalam view saat ini: {len(scored)}
@@ -581,7 +784,7 @@ def explain_with_shap(scored: pd.DataFrame, xgb_pipeline, explainer, selected_fe
     ).sort_values("shap_value", key=lambda s: np.abs(s), ascending=False)
 
     local_top = row_feature_df.head(10).sort_values("shap_value")
-    bar_colors = np.where(local_top["shap_value"] >= 0, "#dc2626", "#2563eb")
+    bar_colors = np.where(local_top["shap_value"] >= 0, "#111827", "#6b7280")
     local_fig = go.Figure(
         go.Bar(
             x=local_top["shap_value"],
@@ -918,6 +1121,7 @@ def render_single_prediction_result(
     selected_features: list[str],
     selected_model_name: str,
     threshold: float,
+    plan_type: str,
 ) -> None:
     comparison, local_shap_df, chosen_probability, chosen_risk, recommendation, range_warnings = build_single_prediction_output(
         input_frame,
@@ -929,6 +1133,7 @@ def render_single_prediction_result(
     )
 
     st.markdown("##### Prediction Result")
+    st.caption(f"Plan model: {plan_type} | Algorithm: {selected_model_name}")
     result_cols = st.columns(3)
     with result_cols[0]:
         st.metric(f"{selected_model_name} probability", f"{chosen_probability:.2%}")
@@ -981,17 +1186,19 @@ def explain_single_input(input_frame: pd.DataFrame, pipeline, explainer, selecte
     return local_df.sort_values("shap_value", key=lambda s: np.abs(s), ascending=False).head(10).sort_values("shap_value")
 
 
-def render_predict_page(data: pd.DataFrame, assets: AppAssets, selected_features: list[str], selected_model_name: str, threshold: float) -> None:
+def render_predict_page(data: pd.DataFrame, active_plan_type: str, selected_model_name: str, threshold: float) -> None:
     st.markdown(
         """
         <div class="hero">
             <h1>Customer Churn Quick Prediction</h1>
-            <p>Prediksi cepat untuk customer baru atau customer yang sudah ada di data.</p>
+            <p>Prediksi cepat dengan model terpisah per plan type agar routing risiko lebih jelas.</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
+    assets = load_assets(active_plan_type)
+    selected_features = assets["selected_features"]
     defaults = build_feature_defaults(data, selected_features)
     categorical_options = {
         column: sorted(data[column].dropna().astype(str).unique().tolist())
@@ -1000,7 +1207,7 @@ def render_predict_page(data: pd.DataFrame, assets: AppAssets, selected_features
     }
 
     st.markdown(
-        '<div class="dashboard-note">Pilih mode yang sesuai: input manual atau customer existing.</div>',
+        f'<div class="dashboard-note">Model aktif saat ini: <strong>{active_plan_type}</strong>. Pilih mode yang sesuai: input manual atau customer existing.</div>',
         unsafe_allow_html=True,
     )
     mode = st.radio("Predict mode", ["Predict Input", "Existing Customer"], horizontal=True, index=0)
@@ -1012,6 +1219,7 @@ def render_predict_page(data: pd.DataFrame, assets: AppAssets, selected_features
 
             with left_col:
                 st.markdown("##### Profil")
+                plan_type_for_input = st.selectbox("Plan Type", PLAN_TYPES, index=PLAN_TYPES.index(active_plan_type))
                 if "tenure_months" in selected_features:
                     config = get_numeric_field_config(data, "tenure_months", defaults)
                     form_values["tenure_months"] = st.number_input("Tenure (months)", **build_number_input_kwargs(config))
@@ -1057,9 +1265,18 @@ def render_predict_page(data: pd.DataFrame, assets: AppAssets, selected_features
 
         input_frame = build_manual_input_row(data, selected_features, form_values)
         input_frame.insert(0, ID_COLUMN, "SIMULASI-001")
-        render_single_prediction_result(input_frame, data, assets, selected_features, selected_model_name, threshold)
+        input_assets = load_assets(plan_type_for_input)
+        render_single_prediction_result(
+            input_frame,
+            data,
+            input_assets,
+            input_assets["selected_features"],
+            selected_model_name,
+            threshold,
+            plan_type_for_input,
+        )
         st.markdown(
-            '<div class="dashboard-note">Mode ini untuk simulasi cepat. Advanced Analysis dipakai untuk eksplorasi data.</div>',
+            '<div class="dashboard-note">Mode ini untuk simulasi cepat. Advanced Analysis dipakai untuk eksplorasi data per plan.</div>',
             unsafe_allow_html=True,
         )
         return
@@ -1078,78 +1295,89 @@ def render_predict_page(data: pd.DataFrame, assets: AppAssets, selected_features
         return
 
     st.markdown("##### Customer Summary")
-    profile_cols = st.columns(3)
-    profile = customer_row.iloc[0]
-    with profile_cols[0]:
-        st.metric("ID", str(profile[ID_COLUMN]))
-        st.metric("Plan", str(profile.get("plan_type", "-")))
-    with profile_cols[1]:
-        st.metric("Contract", str(profile.get("contract_type", "-")))
-        st.metric("Tenure", f"{profile.get('tenure_months', 0)} months")
-    with profile_cols[2]:
-        st.metric("Revenue", f"{float(profile.get('monthly_revenue', 0.0)):.2f}")
-        st.metric("NPS", str(profile.get("nps_score", "-")))
+    left_col, right_col = st.columns([1.05, 0.95])
+    with left_col:
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">Sentiment Model Performance</div>', unsafe_allow_html=True)
+        if sentiment_metrics:
+            nb_values = sentiment_metrics.get("naive_bayes", {})
+            sentiment_display = pd.DataFrame(
+                [
+                    {
+                        "Model": "Naive Bayes",
+                        "Accuracy": nb_values.get("accuracy", 0.0),
+                        "Precision (macro)": nb_values.get("precision_macro", 0.0),
+                        "Recall (macro)": nb_values.get("recall_macro", 0.0),
+                        "F1 (macro)": nb_values.get("f1_macro", 0.0),
+                    }
+                ]
+            )
+            st.dataframe(
+                sentiment_display.style.format(
+                    {
+                        "Accuracy": "{:.3f}",
+                        "Precision (macro)": "{:.3f}",
+                        "Recall (macro)": "{:.3f}",
+                        "F1 (macro)": "{:.3f}",
+                    }
+                ),
+                use_container_width=True,
+                height=220,
+            )
+            label_strategy = sentiment_metrics.get("label_strategy", {})
+            if label_strategy:
+                st.caption(
+                    "Training NLP memakai komentar saja dengan weak supervision: "
+                    f"source={label_strategy.get('source', '-')}, "
+                    f"method={label_strategy.get('label_method', '-')}, "
+                    f"dataset={label_strategy.get('dataset', '-')}.")
+        else:
+            st.info("Artifact sentiment belum ditemukan.")
 
-    with st.expander("Full profile", expanded=False):
-        st.dataframe(customer_row.T.rename(columns={customer_row.index[0]: "value"}), use_container_width=True)
+        if not sentiment_predictions.empty:
+            with st.expander("Preview sentiment test predictions", expanded=False):
+                st.dataframe(sentiment_predictions.head(12), use_container_width=True, height=240)
+                st.download_button(
+                    label="Download sentiment test predictions",
+                    data=sentiment_predictions.to_csv(index=False).encode("utf-8"),
+                    file_name="sentiment_test_predictions.csv",
+                    mime="text/csv",
+                )
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    if st.button("Check Risk", use_container_width=True):
-        input_frame = customer_row[[ID_COLUMN] + [column for column in selected_features if column in customer_row.columns]].copy()
-        render_single_prediction_result(input_frame, data, assets, selected_features, selected_model_name, threshold)
-    else:
-        st.info("Klik Check Risk untuk melihat hasil prediksi customer ini.")
+    with right_col:
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">Session Summary</div>', unsafe_allow_html=True)
+        if session_summary:
+            metric_cols = st.columns(2)
+            with metric_cols[0]:
+                st.metric("Total comments", session_summary.get("total_comments", 0))
+            with metric_cols[1]:
+                unique_commenters = session_summary.get("unique_commenters")
+                st.metric("Unique commenters", unique_commenters if unique_commenters is not None else "-")
 
+            if session_summary_text:
+                st.text_area("Extractive session summary", value=session_summary_text, height=220)
 
-def render_advanced_analysis_page(
-    data: pd.DataFrame,
-    assets: AppAssets,
-    nlp_assets: NLPAssets,
-    selected_features: list[str],
-    selected_model_name: str,
-    threshold: float,
-) -> None:
-    st.markdown(
-        """
-        <div class="hero">
-            <h1>Customer Churn Early Warning Dashboard</h1>
-            <p>Analisis mendalam dengan filter data, perbandingan XGBoost vs CatBoost, dan penjelasan SHAP per customer.</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+            top_keywords = session_summary.get("top_keywords", [])
+            if top_keywords:
+                st.markdown("**Top keywords**")
+                st.dataframe(pd.DataFrame(top_keywords), use_container_width=True, height=200)
 
-    st.markdown(
-        '<div class="dashboard-note">Halaman ini ditujukan untuk user advance. Gunakan filter di sidebar untuk menyaring customer, lalu lihat metrik, ranking risiko, dan penjelasan model.</div>',
-        unsafe_allow_html=True,
-    )
+            representative_comments = session_summary.get("representative_comments", [])
+            if representative_comments:
+                with st.expander("Representative comments", expanded=False):
+                    st.dataframe(pd.DataFrame(representative_comments), use_container_width=True, height=240)
 
-    filtered = filter_data(data)
-    if filtered.empty:
-        st.warning("Tidak ada data yang cocok dengan filter saat ini.")
-        return
-
-    pipeline = assets["xgb_pipeline"] if selected_model_name == "XGBoost" else assets["catboost_pipeline"]
-    explainer = assets["xgb_explainer"] if selected_model_name == "XGBoost" else assets["catboost_explainer"]
-    scored = score_frame(pipeline, filtered, threshold, selected_features)
-    global_shap_df, explanation_export = build_shap_summary(scored, pipeline, explainer, selected_features)
-
-    st.subheader("Penjelasan Risiko")
-    st.markdown(build_explanation_summary(scored, assets, selected_model_name, threshold))
-
-    if not global_shap_df.empty:
-        st.caption("Faktor global yang paling sering mendorong churn pada view ini")
-        st.dataframe(
-            global_shap_df.style.format({"mean_abs_shap": "{:.4f}"}),
-            use_container_width=True,
-            height=260,
-        )
-
-    st.download_button(
-        label="Download explanation CSV",
-        data=explanation_export.to_csv(index=False).encode("utf-8"),
-        file_name="churn_explanation_summary.csv",
-        mime="text/csv",
-    )
+            st.download_button(
+                label="Download session summary JSON",
+                data=json.dumps(session_summary, indent=2, ensure_ascii=False).encode("utf-8"),
+                file_name="session_summary.json",
+                mime="application/json",
+            )
+        else:
+            st.info("Artifact session summary belum ditemukan.")
+        st.markdown('</div>', unsafe_allow_html=True)
 
     if selected_features:
         st.subheader("Fitur yang dipilih otomatis")
@@ -1212,7 +1440,7 @@ def render_advanced_analysis_page(
         mime="text/csv",
     )
 
-    show_model_comparison(assets["metrics"])
+    show_model_comparison(assets["metrics"], active_plan_type)
 
     st.subheader("Ringkasan klasifikasi")
     st.write(
@@ -1249,22 +1477,24 @@ def main() -> None:
 
     render_logout_button()
 
-    assets = load_assets()
     nlp_assets = load_nlp_assets()
     data = load_source_data()
-    selected_features = assets["selected_features"]
     page_name = st.sidebar.radio("Dashboard page", ["Predict", "Advanced Analysis"], index=0)
+    active_plan_type = st.sidebar.selectbox("Active plan model", PLAN_TYPES, index=0)
     selected_model_name = st.sidebar.radio("Scoring model", ["XGBoost", "CatBoost"], index=0)
     threshold = st.sidebar.slider("Risk threshold", min_value=0.10, max_value=0.90, value=0.50, step=0.05)
 
-    st.sidebar.caption("Label churn historis dipakai hanya sebagai ground truth. Model memprediksi tanpa melihat kolom churned. Training memakai split stratified 80/20 dan SMOTE di data training.")
+    active_assets = load_assets(active_plan_type)
+    selected_features = active_assets["selected_features"]
+    st.sidebar.caption("Label churn historis dipakai hanya sebagai ground truth. Model memprediksi tanpa melihat kolom churned. Setiap plan punya model sendiri dan dashboard akan mengikuti plan aktif.")
+    st.sidebar.success(f"Active plan model: {active_plan_type}")
     if selected_features:
-        st.sidebar.success(f"Auto-selected features: {len(selected_features)}")
+        st.sidebar.caption(f"Auto-selected features: {len(selected_features)}")
         st.sidebar.caption(", ".join(selected_features))
     if page_name == "Predict":
-        render_predict_page(data, assets, selected_features, selected_model_name, threshold)
+        render_predict_page(data, active_plan_type, selected_model_name, threshold)
     else:
-        render_advanced_analysis_page(data, assets, nlp_assets, selected_features, selected_model_name, threshold)
+        render_advanced_analysis_page(data, nlp_assets, active_plan_type, selected_model_name, threshold)
 
 
 if __name__ == "__main__":

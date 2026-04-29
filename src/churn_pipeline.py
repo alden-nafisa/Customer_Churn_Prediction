@@ -27,17 +27,136 @@ from catboost import CatBoostClassifier
 from xgboost import XGBClassifier
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DATA_PATH = PROJECT_ROOT / "customers_dataset_tidied.xlsx"
+RAW_DATA_DIR = PROJECT_ROOT / "churn_analysis_datasets"
+DATA_PATH = RAW_DATA_DIR
 ARTIFACT_DIR = PROJECT_ROOT / "artifacts"
 
 TARGET_COLUMN = "churned"
 ID_COLUMN = "customer_id"
+PLAN_TYPE_COLUMN = "plan_type"
+PLAN_TYPES = ["Starter", "Professional", "Enterprise"]
 RANDOM_STATE = 42
 TEST_SIZE = 0.2
+FEATURE_COLUMNS = [
+    "plan_type",
+    "contract_type",
+    "tenure_months",
+    "total_users",
+    "monthly_usage_hrs",
+    "feature_adoption_pct",
+    "last_login_days_ago",
+    "support_tickets_last_90d",
+    "nps_score",
+    "payment_delay_count",
+    "monthly_revenue",
+]
+
+
+def _read_csv_with_dates(path: Path, date_columns: list[str]) -> pd.DataFrame:
+    frame = pd.read_csv(path)
+    for column in date_columns:
+        if column in frame.columns:
+            frame[column] = pd.to_datetime(frame[column], errors="coerce", dayfirst=True)
+    return frame
+
+
+def _reference_date(*series_list: pd.Series) -> pd.Timestamp:
+    candidates = []
+    for series in series_list:
+        valid_values = pd.to_datetime(series, errors="coerce").dropna()
+        if not valid_values.empty:
+            candidates.append(valid_values.max())
+
+    if not candidates:
+        return pd.Timestamp.today().normalize()
+
+    return max(candidates)
+
+
+def build_churn_feature_table(raw_dir: str | Path = RAW_DATA_DIR) -> pd.DataFrame:
+    raw_path = Path(raw_dir)
+    accounts = _read_csv_with_dates(raw_path / "customer_accounts.csv", ["subscription_date", "unsubscribed_date"])
+    usage = _read_csv_with_dates(raw_path / "monthly_usage_metrics.csv", ["last_login_date"])
+    billing = _read_csv_with_dates(raw_path / "billing_data.csv", ["billing_date", "payment_date"])
+    nps = _read_csv_with_dates(raw_path / "nps_surveys.csv", ["survey_date"])
+    tickets = _read_csv_with_dates(raw_path / "support_tickets.csv", ["created_date"])
+
+    reference_date = _reference_date(
+        accounts["subscription_date"],
+        accounts["unsubscribed_date"],
+        usage["last_login_date"],
+        billing["billing_date"],
+        billing["payment_date"],
+        nps["survey_date"],
+        tickets["created_date"],
+    )
+
+    feature_frame = accounts[["customer_id", "plan_type", "contract_type", "subscription_date", "unsubscribed_date", "total_users"]].copy()
+    feature_frame["churned"] = feature_frame["unsubscribed_date"].notna().astype(int)
+    feature_frame["anchor_date"] = feature_frame["unsubscribed_date"].fillna(reference_date)
+
+    tenure_days = (feature_frame["anchor_date"] - feature_frame["subscription_date"]).dt.days.clip(lower=0)
+    feature_frame["tenure_months"] = np.rint(tenure_days / 30.4375).astype(int)
+
+    usage_frame = feature_frame[["customer_id", "anchor_date"]].merge(
+        usage[["customer_id", "monthly_usage_hrs", "feature_adoption_pct", "last_login_date"]],
+        on="customer_id",
+        how="left",
+    )
+    feature_frame["monthly_usage_hrs"] = usage_frame["monthly_usage_hrs"].astype(float)
+    feature_frame["feature_adoption_pct"] = usage_frame["feature_adoption_pct"].astype(float)
+    feature_frame["last_login_days_ago"] = (feature_frame["anchor_date"] - usage_frame["last_login_date"]).dt.days.clip(lower=0)
+
+    billing_frame = feature_frame[["customer_id", "anchor_date"]].merge(
+        billing[["customer_id", "billing_date", "payment_value", "record_type"]],
+        on="customer_id",
+        how="left",
+    )
+    billing_frame = billing_frame[
+        billing_frame["billing_date"].notna() & (billing_frame["billing_date"] <= billing_frame["anchor_date"])
+    ].copy()
+    payment_rows = billing_frame[billing_frame["record_type"].astype(str).str.lower() == "payment"].copy()
+    dunning_rows = billing_frame[billing_frame["record_type"].astype(str).str.lower() == "dunning"].copy()
+
+    monthly_revenue = payment_rows.groupby("customer_id", as_index=True)["payment_value"].median()
+    payment_delay_count = dunning_rows.groupby("customer_id", as_index=True).size()
+
+    ticket_frame = feature_frame[["customer_id", "anchor_date"]].merge(
+        tickets[["customer_id", "created_date"]],
+        on="customer_id",
+        how="left",
+    )
+    ticket_frame = ticket_frame[
+        ticket_frame["created_date"].notna()
+        & (ticket_frame["created_date"] <= ticket_frame["anchor_date"])
+        & (ticket_frame["created_date"] >= ticket_frame["anchor_date"] - pd.Timedelta(days=90))
+    ].copy()
+    support_tickets_last_90d = ticket_frame.groupby("customer_id", as_index=True).size()
+
+    nps_frame = feature_frame[["customer_id", "anchor_date"]].merge(
+        nps[["customer_id", "survey_date", "nps_score"]],
+        on="customer_id",
+        how="left",
+    )
+    nps_frame = nps_frame[
+        nps_frame["survey_date"].notna() & (nps_frame["survey_date"] <= nps_frame["anchor_date"])
+    ].sort_values(["customer_id", "survey_date"])
+    latest_nps = nps_frame.groupby("customer_id", as_index=True)["nps_score"].last()
+
+    feature_frame["monthly_revenue"] = feature_frame["customer_id"].map(monthly_revenue).astype(float)
+    feature_frame["payment_delay_count"] = feature_frame["customer_id"].map(payment_delay_count).fillna(0).astype(int)
+    feature_frame["support_tickets_last_90d"] = feature_frame["customer_id"].map(support_tickets_last_90d).fillna(0).astype(int)
+    feature_frame["nps_score"] = feature_frame["customer_id"].map(latest_nps).astype(float)
+
+    model_frame = feature_frame[["customer_id"] + FEATURE_COLUMNS + [TARGET_COLUMN]].copy()
+    model_frame.drop(columns=["anchor_date"], errors="ignore", inplace=True)
+    return model_frame
 
 
 def load_dataset(data_path: str | Path = DATA_PATH) -> pd.DataFrame:
     path = Path(data_path)
+    if path.is_dir():
+        return build_churn_feature_table(path)
     if path.suffix.lower() in {".xlsx", ".xls"}:
         return pd.read_excel(path)
     return pd.read_csv(path)
@@ -47,6 +166,15 @@ def split_features_target(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
     features = df.drop(columns=[TARGET_COLUMN, ID_COLUMN])
     target = df[TARGET_COLUMN].astype(int)
     return features, target
+
+
+def get_model_feature_frame(df: pd.DataFrame) -> pd.DataFrame:
+    excluded_columns = [TARGET_COLUMN, ID_COLUMN, PLAN_TYPE_COLUMN]
+    return df.drop(columns=[column for column in excluded_columns if column in df.columns]).copy()
+
+
+def get_plan_slug(plan_type: str) -> str:
+    return plan_type.strip().lower().replace(" ", "-")
 
 
 def detect_feature_types(features: pd.DataFrame) -> tuple[list[str], list[str]]:

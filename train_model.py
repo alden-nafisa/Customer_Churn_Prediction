@@ -12,12 +12,15 @@ from xgboost import XGBClassifier
 from src.churn_pipeline import (
     ARTIFACT_DIR,
     DATA_PATH,
+    PLAN_TYPES,
     build_imbalance_aware_pipeline,
     build_catboost_pipeline,
     build_xgb_pipeline,
     detect_feature_types,
     evaluate_model,
     get_feature_names,
+    get_model_feature_frame,
+    get_plan_slug,
     load_dataset,
     save_artifact,
     split_features_target,
@@ -75,7 +78,8 @@ def select_important_features(
 
 def main() -> None:
     dataset = load_dataset(DATA_PATH)
-    features, target = split_features_target(dataset)
+    features = get_model_feature_frame(dataset)
+    target = dataset["churned"].astype(int)
     numeric_features, categorical_features = detect_feature_types(features)
 
     x_train, x_test, y_train, y_test = train_test_data(features, target)
@@ -123,67 +127,100 @@ def main() -> None:
 
     print(f"Selected features ({len(selected_features)}): {selected_features}")
 
-    xgb_pipeline = build_xgb_pipeline(selected_numeric_features, selected_categorical_features)
-    catboost_pipeline = build_catboost_pipeline(selected_numeric_features, selected_categorical_features)
-
-    print("Training XGBoost model...")
-    xgb_pipeline.fit(x_train, y_train)
-
-    print("Training CatBoost model...")
-    catboost_pipeline.fit(x_train, y_train)
-
-    xgb_metrics = evaluate_model(xgb_pipeline, x_test, y_test)
-    catboost_metrics = evaluate_model(catboost_pipeline, x_test, y_test)
-
-    feature_names = get_feature_names(xgb_pipeline)
-
-    test_predictions = pd.DataFrame(
-        {
-            "customer_id": dataset.loc[x_test.index, "customer_id"],
-            "actual_churn": y_test.values,
-            "xgb_probability": xgb_pipeline.predict_proba(x_test)[:, 1],
-            "catboost_probability": catboost_pipeline.predict_proba(x_test)[:, 1],
-        }
-    )
-    test_predictions["xgb_predicted"] = (test_predictions["xgb_probability"] >= 0.5).astype(int)
-    test_predictions["catboost_predicted"] = (test_predictions["catboost_probability"] >= 0.5).astype(int)
-
     ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
-    save_artifact(xgb_pipeline, ARTIFACT_DIR / "xgb_pipeline.joblib")
-    save_artifact(catboost_pipeline, ARTIFACT_DIR / "catboost_pipeline.joblib")
-    test_predictions.to_csv(ARTIFACT_DIR / "test_predictions.csv", index=False)
+    plan_metrics: dict[str, dict[str, object]] = {}
 
-    metrics = {
-        "xgboost": xgb_metrics,
-        "catboost": catboost_metrics,
-        "feature_names": feature_names,
+    for plan_type in PLAN_TYPES:
+        plan_dataset = dataset[dataset["plan_type"] == plan_type].copy()
+        plan_features = get_model_feature_frame(plan_dataset)
+        plan_target = plan_dataset["churned"].astype(int)
+        plan_x_train, plan_x_test, plan_y_train, plan_y_test = train_test_data(plan_features, plan_target)
+
+        xgb_pipeline = build_xgb_pipeline(selected_numeric_features, selected_categorical_features)
+        catboost_pipeline = build_catboost_pipeline(selected_numeric_features, selected_categorical_features)
+
+        print(f"Training XGBoost model for {plan_type}...")
+        xgb_pipeline.fit(plan_x_train, plan_y_train)
+
+        print(f"Training CatBoost model for {plan_type}...")
+        catboost_pipeline.fit(plan_x_train, plan_y_train)
+
+        xgb_metrics = evaluate_model(xgb_pipeline, plan_x_test, plan_y_test)
+        catboost_metrics = evaluate_model(catboost_pipeline, plan_x_test, plan_y_test)
+        feature_names = get_feature_names(xgb_pipeline)
+
+        plan_slug = get_plan_slug(plan_type)
+        plan_artifact_dir = ARTIFACT_DIR / "plan_models" / plan_slug
+        plan_artifact_dir.mkdir(parents=True, exist_ok=True)
+
+        test_predictions = pd.DataFrame(
+            {
+                "customer_id": plan_dataset.loc[plan_x_test.index, "customer_id"],
+                "plan_type": plan_type,
+                "actual_churn": plan_y_test.values,
+                "xgb_probability": xgb_pipeline.predict_proba(plan_x_test)[:, 1],
+                "catboost_probability": catboost_pipeline.predict_proba(plan_x_test)[:, 1],
+            }
+        )
+        test_predictions["xgb_predicted"] = (test_predictions["xgb_probability"] >= 0.5).astype(int)
+        test_predictions["catboost_predicted"] = (test_predictions["catboost_probability"] >= 0.5).astype(int)
+
+        save_artifact(xgb_pipeline, plan_artifact_dir / "xgb_pipeline.joblib")
+        save_artifact(catboost_pipeline, plan_artifact_dir / "catboost_pipeline.joblib")
+        test_predictions.to_csv(plan_artifact_dir / "test_predictions.csv", index=False)
+
+        plan_metrics[plan_type] = {
+            "xgboost": xgb_metrics,
+            "catboost": catboost_metrics,
+            "feature_names": feature_names,
+            "selected_features": selected_features,
+            "feature_columns": {
+                "numeric": selected_numeric_features,
+                "categorical": selected_categorical_features,
+            },
+            "training_strategy": {
+                "split": "stratified_80_20",
+                "feature_selection": {
+                    "method": "permutation_importance_on_holdout",
+                    "coverage": FEATURE_SELECTION_COVERAGE,
+                    "minimum_features": MIN_SELECTED_FEATURES,
+                    "validation_split": 0.25,
+                },
+                "resampling": "SMOTE_on_training_only",
+                "plan_scope": plan_type,
+            },
+        }
+
+        print(f"\n=== {plan_type} Model Comparison ===")
+        for name, values in (("XGBoost", xgb_metrics), ("CatBoost", catboost_metrics)):
+            print(f"\n{name}")
+            for metric_name, metric_value in values.items():
+                if metric_name == "confusion_matrix":
+                    print(f"{metric_name}: {metric_value}")
+                else:
+                    print(f"{metric_name}: {metric_value:.4f}")
+
+    summary_payload = {
         "selected_features": selected_features,
         "feature_columns": {
             "numeric": selected_numeric_features,
             "categorical": selected_categorical_features,
         },
+        "plans": plan_metrics,
         "training_strategy": {
-            "split": "stratified_80_20",
+            "split": "stratified_80_20_per_plan",
             "feature_selection": {
-                "method": "permutation_importance_on_holdout",
+                "method": "permutation_importance_on_holdout_from_full_dataset",
                 "coverage": FEATURE_SELECTION_COVERAGE,
                 "minimum_features": MIN_SELECTED_FEATURES,
                 "validation_split": 0.25,
             },
             "resampling": "SMOTE_on_training_only",
+            "plan_routing": "one_model_pair_per_plan_type",
         },
     }
-    (ARTIFACT_DIR / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+    (ARTIFACT_DIR / "plan_model_metrics.json").write_text(json.dumps(summary_payload, indent=2), encoding="utf-8")
     selected_importance_frame.to_csv(ARTIFACT_DIR / "feature_selection_summary.csv", index=False)
-
-    print("\n=== Model Comparison ===")
-    for name, values in (("XGBoost", xgb_metrics), ("CatBoost", catboost_metrics)):
-        print(f"\n{name}")
-        for metric_name, metric_value in values.items():
-            if metric_name == "confusion_matrix":
-                print(f"{metric_name}: {metric_value}")
-            else:
-                print(f"{metric_name}: {metric_value:.4f}")
 
     print(f"\nArtifacts saved to: {Path(ARTIFACT_DIR).resolve()}")
 
