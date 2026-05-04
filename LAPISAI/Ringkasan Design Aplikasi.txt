@@ -1,0 +1,182 @@
+Ringkasan Fitur Dashboard LapisAI
+1. Metrik Prediksi Churn Berdasarkan Tipe Paket (Bagian Atas)
+Bagian ini menampilkan performa prediksi model machine learning yang telah dipisahkan (segmented) berdasarkan tiga tipe paket berlangganan. Angka yang tertera merepresentasikan tingkat probabilitas churn (semakin tinggi mendekati 1, semakin besar risikonya).
+
+Starter (0,687): Menunjukkan tingkat risiko churn pada pengguna paket dasar. Grafik garis (sparkline) memberikan visualisasi tren fluktuasi risiko dari waktu ke waktu.
+
+Enterprise (0,786): Menunjukkan tingkat risiko churn tertinggi di antara ketiga paket. Ini mengindikasikan perlunya perhatian khusus pada segmen klien skala besar ini.
+
+Professional (0,576): Menampilkan tingkat risiko churn yang relatif paling rendah, ditandai dengan grafik tren yang lebih stabil.
+
+2. Sidebar Kiri: Peringatan Dini & Metrik Bisnis
+
+HIGH-RISK ALERT: Fitur ini bertindak sebagai sistem peringatan dini (Early Warning System). Menampilkan daftar pelanggan spesifik yang membutuhkan tindakan segera berdasarkan deteksi anomali oleh model.
+
+Contoh: Notifikasi untuk segera menawarkan diskon kepada C-0992 (Enterprise) karena probabilitas churn naik ke 85%, atau peringatan terkait C-0112 (Professional) yang mengirimkan 3 tiket komplain dalam sehari.
+
+Churn vs Retention Rate (Grafik Batang): Menyajikan perbandingan kinerja dari minggu ke minggu. Memvisualisasikan rasio antara pelanggan yang memutuskan berhenti (Churn) dengan mereka yang memilih bertahan (Retention).
+
+3. Panel Tengah: Customer Churn (Daftar Pelanggan Berisiko)
+Bagian ini menyajikan daftar detail pelanggan beserta hasil prediksi dari model klasifikasi.
+
+Filter Waktu: Terdapat toggle (Day, Week, Month) untuk menyaring data berdasarkan rentang waktu.
+
+Daftar Pelanggan: Menampilkan Customer ID, jenis paket (misal: Starter/Monthly), nilai probabilitas (skor prediktif), dan status akhir (Churned/Not Churned). Color coding (merah untuk Churned, hijau untuk Not Churned) mempermudah pemindaian visual.
+
+Navigasi Lanjutan: Tombol "All Customer" di bagian bawah tidak hanya menampilkan keseluruhan 2.480 pelanggan, tetapi juga berfungsi sebagai pintu gerbang menuju halaman Advanced Analysis, tempat pengguna dapat membedah faktor penyebab churn secara mendalam.
+
+4. Panel Kanan: Feedback Customer (Analisis Sentimen NLP)
+Panel ini didedikasikan untuk analisis kualitatif, mengukur kepuasan pelanggan melalui ulasan teks.
+
+Skor NPS & Sentimen: Menampilkan Customer ID bersama dengan ulasan singkat mereka. Fitur utamanya adalah hasil dari model NLP (Natural Language Processing) yang mengekstrak Skor NPS (1-10) dan mengklasifikasikan sentimen menjadi Positive (Hijau), Negative (Merah), atau Netral (Kuning).
+
+Navigasi Lanjutan: Tombol "All Feedbacks" di bagian bawah menavigasi pengguna ke Advanced Analysis yang berfokus pada ulasan pelanggan, memungkinkan eksplorasi 1.520 feedback secara komprehensif.
+
+
+1. Panel Navigasi Global (Sidebar Kiri)
+Sidebar ini bersifat statis dan selalu muncul di setiap halaman untuk memberikan konteks sistem secara real-time kepada Admin.
+
+Profil Pengguna: Menampilkan identitas pengguna yang sedang login (Welcome, Admin).
+
+Log System & Machine Learning: Bertindak sebagai feed aktivitas sistem di belakang layar. Menampilkan metrik seperti:
+
+Peningkatan akurasi model XGBoost setelah di-retrain (92.4%).
+
+Status sinkronisasi data dengan database Supabase (500 baris baru).
+
+Eksekusi aksi otomatis (pengiriman email retensi).
+
+Deteksi anomali data (lonjakan tiket bantuan).
+
+Status penyelesaian pipeline analisis sentimen NLP mingguan.
+
+HIGH-RISK ALERT: Fitur Early Warning System yang menampilkan daftar pelanggan dengan risiko churn kritis (misalnya, probabilitas C-0992 mencapai 85%) agar Admin dapat segera mengambil tindakan seperti menawarkan diskon.
+
+
+Ringkasan Fitur Churn Prediction LapisAI
+Halaman Pertama: Customer Churn Prediction
+Halaman ini didedikasikan sebagai alat interaktif untuk menjalankan prediksi churn secara manual berdasarkan parameter yang dimasukkan oleh pengguna.
+
+Prediction Input (Formulir Prediksi):
+
+Pemilihan Model: Admin dapat memilih algoritma yang ingin digunakan (XGBoost atau CatBoost).
+
+Filter Global: Terdapat dropdown untuk memilih Plan Type (Starter, Enterprise, Professional, atau All) dan Contract Type (Monthly, Annual, atau All).
+
+Input Fitur Spesifik: Admin dapat memasukkan nilai spesifik untuk fitur-fitur pemodelan, seperti ambang batas (Threshold), hari sejak login terakhir, jumlah tiket bantuan dalam 90 hari, lama berlangganan (Tenure), persentase adopsi fitur, pendapatan bulanan, dan jumlah keterlambatan pembayaran.
+
+Tombol Eksekusi: Tombol utama "RUN PREDICTION" untuk memicu model.
+
+Prediction Response (Hasil Prediksi):
+
+Menampilkan kartu-kartu metrik yang menyoroti hasil dari input di atas.
+
+Terlihat probabilitas churn mencapai 99.21% dengan status prediksi Churn.
+
+Menampilkan ringkasan konfigurasi: model yang digunakan (XGBoost), ambang batas (0,50), tipe paket (Starter), dan jumlah fitur yang dievaluasi (6 fitur, tanpa ada nilai yang hilang/ missing features).
+
+Ringkasan Fitur Data Management & Integration LapisAI
+
+
+Ringkasan Fitur Advance Analysis LapisAI
+Halaman Kedua: Advance Analysis
+Halaman ini adalah pusat komando analitik yang menyajikan wawasan mendalam (insights), penjelasan model (Explainable AI), dan analisis teks (NLP).
+
+Bagian Atas: Filter & Ringkasan Eksekutif
+
+Analysis Input: Baris filter inline untuk menyesuaikan data yang ditampilkan di dasbor tanpa memuat ulang halaman. Ada notifikasi yang menyatakan bahwa sistem memberikan hasil secara otomatis.
+
+4 Kartu KPI Utama: Menyajikan ringkasan evaluasi:
+
+Total pelanggan yang dievaluasi (3,000).
+
+Jumlah pelanggan berisiko tinggi (1,569).
+
+Akurasi model ML (77.07%).
+
+Rata-rata probabilitas churn secara keseluruhan (50.80%).
+
+Visualisasi Tren: Terdapat "Histogram Probabilitas" (tren pergerakan data dari waktu ke waktu) dan "Predicted Revenue Loss" (grafik area yang memvisualisasikan potensi kerugian finansial di masa depan).
+
+Bagian Tengah: Analisis Global & Daftar Pelanggan
+
+Top Global SHAP Drivers: Grafik batang horizontal yang menjelaskan faktor-faktor fitur mana yang paling memengaruhi model secara keseluruhan (misalnya, penggunaan bulanan, masa berlangganan, persentase adopsi fitur).
+
+NPS & Sentiment Trend: Grafik garis yang melacak pergerakan skor kepuasan pelanggan seiring berjalannya waktu.
+
+Customer Risk & Explanation Table: Tabel komprehensif yang mendaftar ID pelanggan, probabilitas churn, faktor utama pemicu churn (berdasarkan SHAP), potensi pendapatan yang berisiko, tren risiko, dan saran tindakan (misal: Shipped, Processing).
+
+Bagian Bawah: Analisis Individual (Local SHAP) & NLP
+
+Local SHAP Explanation: Panel khusus untuk membedah alasan probabilitas churn per individu.
+
+Terdapat navigasi untuk berpindah antar pelanggan (misal: C-001).
+
+Menampilkan ringkasan data spesifik pelanggan tersebut beserta grafik nilai SHAP lokalnya.
+
+Retained Action Suggestion: Sistem ML secara otomatis menghasilkan poin-poin saran strategis untuk menyelamatkan pelanggan tersebut (misal: memprioritaskan follow-up penagihan, eskalasi tiket bantuan, atau edukasi fitur).
+
+Sentiment & Keyword Analysis (Modul NLP):
+
+3 KPI Sentimen: Total ulasan yang dianalisis (1.520), rata-rata skor NPS (7.8), dan rasio sentimen (15% Negatif, 25% Netral, 60% Positif).
+
+Recent Analyzed Feedbacks: Daftar ulasan terbaru yang secara otomatis diberikan tag sentimen (Positif/Negatif/Netral) oleh algoritma Naive Bayes.
+
+Top Keywords: Tabel ekstraksi kata kunci yang paling sering muncul (seperti "telat", "my", "face") lengkap dengan frekuensinya dan sentimen dominan yang menempel pada kata tersebut.
+
+
+Ringkasan Fitur Data Management & Integration LapisAI
+Halaman Data Management & Integration
+Halaman ini dirancang sangat fungsional untuk kebutuhan tata kelola data Admin.
+
+Sidebar Kiri (Konsisten):
+
+Menampilkan profil "Welcome, Admin".
+
+Log System & Machine Learning: Menampilkan riwayat pemrosesan di belakang layar, seperti retrain model XGBoost yang mencapai akurasi 92.4%, sinkronisasi 500 baris data dari Supabase, peringatan anomali tiket komplain, hingga selesainya pipeline NLP mingguan.
+
+High-Risk Alert: Menampilkan notifikasi real-time pelanggan berisiko, seperti probabilitas churn C-0992 yang naik ke 85% dan komplain dari C-0112.
+
+Panel Utama Atas (Aksi):
+
+Import & Sync Data: Area drag-and-drop besar berwarna abu-abu yang intuitif untuk mengunggah dataset secara manual (mendukung format .csv dan .xlsx).
+
+Export Data & Reports: Menyediakan dua dropdown (Tipe Ekspor dan Filter) serta tombol biru "Download Data" untuk menarik laporan ke sistem lokal.
+
+Panel Utama Bawah (Riwayat):
+
+Data Pipeline Logs: Tabel audit yang sangat rapi berisi kolom Date & Time, Action, Status (dilengkapi badge warna Success/Failed), dan jumlah baris data (Rows). Di sini terlihat riwayat interaksi data seperti Auto-Sync, unggah file penagihan bulanan yang gagal (Failed), dan ekspor data prediksi.
+
+
+Ringkasan Fitur Sign In LapisAI
+Halaman Login / Sign In
+Desain halaman autentikasi ini sangat clean dan modern dengan membagi layar menjadi dua bagian (split-screen).
+
+Bagian Kiri (Formulir):
+
+Sapaan "Welcome to our CRM. Sign In to see latest updates."
+
+Formulir standar untuk Username (terisi "Admin123") dan Password.
+
+Fitur "Remember me" untuk kemudahan login.
+
+Tombol "Sign In" biru yang mencolok.
+
+Opsi Single Sign-On (SSO) di bagian bawah untuk masuk menggunakan akun Twitter, Google, atau Facebook.
+
+Bagian Kanan (Visual): Menampilkan ilustrasi vektor bergaya flat design seorang karakter dengan amplop surat berukuran besar, memberikan kesan ramah dan profesional.
+
+
+Ringkasan Fitur Website Error LapisAI
+Halaman Error / Website Not Responding (404)
+Membuat halaman penanganan error (empty/error state) adalah tanda bahwa kamu sangat memedulikan UX (User Experience).
+
+Sidebar Kiri (Mode Pending): Menariknya, sistem alert di kiri berubah statusnya menjadi "Unknown" dan "Pending...". Ini detail UX yang sangat bagus karena mengindikasikan bahwa sistem gagal menarik data dari server saat terjadi error 404. Di bagian bawah juga terdapat ruang kosong untuk grafik "Churn vs Retention Rate".
+
+Panel Utama (Pesan Error):
+
+Menampilkan ilustrasi vektor dua orang yang sedang berusaha memperbaiki/merangkai grafik batang dan garis (sangat pas dengan konteks aplikasi analitik data).
+
+Pesan yang jelas: "Website Not Responding 404" dan instruksi "Please wait until the process begin."
+
+Sebuah tombol "Refresh" biru sebagai Call-to-Action (CTA) agar pengguna dapat memuat ulang halaman tanpa harus menggunakan tombol browser.
