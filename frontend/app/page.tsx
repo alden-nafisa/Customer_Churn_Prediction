@@ -39,6 +39,7 @@ type PredictionResponse = {
 type FeatureValues = Record<string, string>;
 
 const API_PROXY_BASE = "/api";
+const dashboardTabs = ["Day", "Week", "Month"];
 
 function toInputValue(value: string | number | null | undefined): string {
   if (value === null || value === undefined) {
@@ -56,6 +57,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<PredictionResponse | null>(null);
+  const [dashboardView, setDashboardView] = useState<string>(dashboardTabs[0]);
 
   useEffect(() => {
     let cancelled = false;
@@ -169,172 +171,329 @@ export default function Home() {
     }
   }
 
-  return (
-    <main className="page-shell">
-      <section className="hero-panel">
-        <div className="hero-badge">Separated frontend • FastAPI backend • Vercel ready</div>
-        <p className="eyebrow">FastAPI backend + Next.js frontend</p>
-        <h1>Customer Churn Control Room</h1>
-        <p className="hero-copy">
-          Frontend ini terpisah dari model Python. Ia hanya mengirim fitur ke FastAPI,
-          lalu menampilkan hasil prediksi per plan type.
-        </p>
+  const churnRows = [
+    { id: "C-0267", plan: "Starter/Monthly", score: "0.567", status: "Not Churned" },
+    { id: "C-0091", plan: "Starter/Monthly", score: "0.867", status: "Churned" },
+    { id: "C-0176", plan: "Starter/Monthly", score: "0.389", status: "Churned" },
+    { id: "C-0056", plan: "Starter/Monthly", score: "0.567", status: "Churned" },
+    { id: "C-0002", plan: "Starter/Monthly", score: "0.375", status: "Not Churned" },
+    { id: "C-0001", plan: "Starter/Monthly", score: "0.876", status: "Churned" },
+    { id: "C-0011", plan: "Starter/Monthly", score: "0.567", status: "Churned" },
+  ];
 
-        <div className="hero-metrics">
-          <div>
-            <span>Deployment</span>
-            <strong>Vercel + Render/Railway/Fly.io</strong>
+  const feedbackRows = [
+    { id: "C-0267", text: "UI responsif, prediksi sangat akurat.", sentiment: "Positive", nps: 9 },
+    { id: "C-0091", text: "Performa lambat saat muat dataset.", sentiment: "Negative", nps: 5 },
+    { id: "C-0176", text: "Analisis sentimen NLP luar biasa!", sentiment: "Positive", nps: 8 },
+    { id: "C-0056", text: "Bagus, butuh fitur ekspor PDF.", sentiment: "Positive", nps: 10 },
+    { id: "C-0002", text: "Dokumentasi API masih kurang lengkap.", sentiment: "Neutral", nps: 6 },
+    { id: "C-0001", text: "Fitur membantu, harga agak mahal.", sentiment: "Neutral", nps: 7 },
+    { id: "C-0011", text: "Integrasi mulus, tim support responsif.", sentiment: "Positive", nps: 9 },
+  ];
+
+  const metricCards = [
+    { label: "Customers at Risk", value: "1,569", note: "Customers at risk" },
+    { label: "Revenue at Risk", value: "$45,200", note: "Revenue at risk" },
+    { label: "Average NPS", value: "7.4", note: "Sentiment score" },
+  ];
+
+  return (
+    <main className="dashboard-page">
+      <section className="dashboard-banner surface-card">
+        <div className="dashboard-title">
+          <span className="section-tag">Dashboard</span>
+          <h1>Customer Health Overview</h1>
+          <p className="dashboard-copy">Tinjau metrik churn, feedback pelanggan, dan jalankan prediksi langsung dari satu kontrol panel.</p>
+        </div>
+        <div className="dashboard-actions">
+          <button className="button-ghost" type="button">Search</button>
+          <button className="button-ghost" type="button">Refresh</button>
+        </div>
+      </section>
+
+      <section className="metrics-row">
+        {metricCards.map((metric) => (
+          <article key={metric.label} className="metric-card surface-card">
+            <p className="metric-label">{metric.label}</p>
+            <strong>{metric.value}</strong>
+            <p className="metric-note">{metric.note}</p>
+          </article>
+        ))}
+      </section>
+
+      <section className="dashboard-panels">
+        <div className="surface-card churn-panel">
+          <div className="panel-header">
+            <div>
+              <p className="card-kicker">Customer Churn</p>
+              <h2>High-risk customers</h2>
+            </div>
+            <div className="toggle-group">
+              {dashboardTabs.map((period) => (
+                <button
+                  key={period}
+                  type="button"
+                  className={dashboardView === period ? "toggle-button active" : "toggle-button"}
+                  onClick={() => setDashboardView(period)}
+                >
+                  {period}
+                </button>
+              ))}
+            </div>
           </div>
-          <div>
-            <span>Backend</span>
-            <strong>FastAPI</strong>
+
+          <div className="table-scroll">
+            <div className="list-table header-row">
+              <span>Customer ID</span>
+              <span>Plan</span>
+              <span>Score</span>
+            </div>
+            {churnRows.map((row) => (
+              <div key={row.id} className="list-row">
+                <div className="customer-cell">
+                  <div className="customer-avatar" />
+                  <div>
+                    <strong>{row.id}</strong>
+                    <small>{row.plan}</small>
+                  </div>
+                </div>
+                <span>{row.plan}</span>
+                <div className="status-cell">
+                  <span className={row.status === "Churned" ? "status-chip danger" : "status-chip success"}>
+                    {row.status}
+                  </span>
+                  <strong>{row.score}</strong>
+                </div>
+              </div>
+            ))}
           </div>
-          <div>
-            <span>Model routing</span>
-            <strong>Per plan type</strong>
+
+          <div className="panel-bottom">
+            <button className="button-secondary" type="button">All Customer</button>
+            <span>2,480 Total Customers</span>
           </div>
         </div>
 
-        <div className="hero-panel-footer">
-          <div>
-            <span>Live contract</span>
-            <strong>/api/predict</strong>
+        <div className="surface-card feedback-panel">
+          <div className="panel-header">
+            <div>
+              <p className="card-kicker">Feedback Customer</p>
+              <h2>Sentiment summary</h2>
+            </div>
+            <div className="toggle-group">
+              {dashboardTabs.map((period) => (
+                <button
+                  key={period}
+                  type="button"
+                  className={dashboardView === period ? "toggle-button active" : "toggle-button"}
+                  onClick={() => setDashboardView(period)}
+                >
+                  {period}
+                </button>
+              ))}
+            </div>
           </div>
-          <div>
-            <span>UI mode</span>
-            <strong>Glass dashboard</strong>
+
+          <div className="table-scroll feedback-list">
+            {feedbackRows.map((feedback) => (
+              <div key={feedback.id} className="feedback-row">
+                <div>
+                  <strong>{feedback.id}</strong>
+                  <p>{feedback.text}</p>
+                </div>
+                <div className="feedback-meta">
+                  <span className={
+                    feedback.sentiment === "Positive"
+                      ? "status-chip success"
+                      : feedback.sentiment === "Negative"
+                      ? "status-chip danger"
+                      : "status-chip neutral"
+                  }>
+                    {feedback.sentiment}
+                  </span>
+                  <strong>NPS: {feedback.nps}</strong>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="panel-bottom">
+            <button className="button-secondary" type="button">All Feedbacks</button>
+            <span>1,520 Total Feedbacks</span>
           </div>
         </div>
       </section>
 
-      <section className="workspace-panel">
-        <div className="workspace-strip">
-          <div className="workspace-chip active">Plan-aware scoring</div>
-          <div className="workspace-chip">API driven</div>
-          <div className="workspace-chip">Responsive layout</div>
-        </div>
-
-        <div className="surface-card">
-          <div className="card-header">
-            <div>
-              <p className="card-kicker">Prediction input</p>
-              <h2>Choose plan and score a customer</h2>
-            </div>
-            <span className="api-pill">API proxy: same-origin /api</span>
-          </div>
-
-          {error ? <div className="alert error">{error}</div> : null}
-
-          <form className="prediction-form" onSubmit={handleSubmit}>
-            <label>
-              Plan Type
-              <select value={selectedPlan} onChange={(event) => setSelectedPlan(event.target.value as PlanSummary["plan_type"])}>
-                {plans.map((plan) => (
-                  <option key={plan.plan_type} value={plan.plan_type}>
-                    {plan.plan_type}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label>
-              Model
-              <select value={selectedModel} onChange={(event) => setSelectedModel(event.target.value as "XGBoost" | "CatBoost") }>
-                {activePlan?.available_models.map((modelName) => (
-                  <option key={modelName} value={modelName}>
-                    {modelName}
-                  </option>
-                )) ?? null}
-              </select>
-            </label>
-
-            <label>
-              Threshold
-              <input
-                type="number"
-                min="0"
-                max="1"
-                step="0.01"
-                value={threshold}
-                onChange={(event) => setThreshold(event.target.value)}
-              />
-            </label>
-
-            <div className="field-grid">
-              {activePlan?.feature_specs.map((spec) => (
-                <label key={spec.name}>
-                  {spec.name.replace(/_/g, " ")}
+      <section className="prediction-section">
+        <div className="prediction-column">
+          <div className="surface-card prediction-panel">
+            <div className="panel-header">
+              <div>
+                <p className="card-kicker">Customer Churn Prediction</p>
+                <h2>Prediction input</h2>
+              </div>
+              <div className="algorithm-group">
+                <label>
                   <input
-                    type="number"
-                    step={spec.step ?? "any"}
-                    min={spec.minimum ?? undefined}
-                    max={spec.maximum ?? undefined}
-                    value={featureValues[spec.name] ?? ""}
-                    onChange={(event) => updateFeatureValue(spec.name, event.target.value)}
+                    type="radio"
+                    name="model"
+                    value="XGBoost"
+                    checked={selectedModel === "XGBoost"}
+                    onChange={() => setSelectedModel("XGBoost")}
                   />
+                  XGBoost
                 </label>
-              ))}
+                <label>
+                  <input
+                    type="radio"
+                    name="model"
+                    value="CatBoost"
+                    checked={selectedModel === "CatBoost"}
+                    onChange={() => setSelectedModel("CatBoost")}
+                  />
+                  CatBoost
+                </label>
+              </div>
             </div>
 
-            <button className="primary-button" type="submit" disabled={loading || !activePlan}>
-              {loading ? "Scoring..." : "Run Prediction"}
-            </button>
-          </form>
-        </div>
+            {error ? <div className="alert error">{error}</div> : null}
 
-        <div className="surface-card result-card">
-          <div className="card-header">
-            <div>
-              <p className="card-kicker">Result</p>
-              <h2>Prediction response</h2>
-            </div>
+            <form className="prediction-form grid-form" onSubmit={handleSubmit}>
+              <label>
+                Plan Type
+                <select value={selectedPlan} onChange={(event) => setSelectedPlan(event.target.value as PlanSummary["plan_type"])}>
+                  {plans.map((plan) => (
+                    <option key={plan.plan_type} value={plan.plan_type}>
+                      {plan.plan_type}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Contract Type
+                <select>
+                  <option>All</option>
+                  <option>Monthly</option>
+                  <option>Annual</option>
+                </select>
+              </label>
+              <label>
+                Threshold
+                <input
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={threshold}
+                  onChange={(event) => setThreshold(event.target.value)}
+                />
+              </label>
+              <label>
+                Last Login Days Ago
+                <input
+                  type="number"
+                  value={featureValues["last_login_days_ago"] ?? ""}
+                  onChange={(event) => updateFeatureValue("last_login_days_ago", event.target.value)}
+                />
+              </label>
+              <label>
+                Support Tickets Last 90d
+                <input
+                  type="number"
+                  value={featureValues["support_tickets_last_90d"] ?? ""}
+                  onChange={(event) => updateFeatureValue("support_tickets_last_90d", event.target.value)}
+                />
+              </label>
+              <label>
+                Tenure Months
+                <input
+                  type="number"
+                  value={featureValues["tenure_months"] ?? ""}
+                  onChange={(event) => updateFeatureValue("tenure_months", event.target.value)}
+                />
+              </label>
+              <label>
+                Feature Adoption PCT
+                <input
+                  type="number"
+                  value={featureValues["feature_adoption_pct"] ?? ""}
+                  onChange={(event) => updateFeatureValue("feature_adoption_pct", event.target.value)}
+                />
+              </label>
+              <label>
+                Monthly Revenue
+                <input
+                  type="number"
+                  value={featureValues["monthly_revenue"] ?? ""}
+                  onChange={(event) => updateFeatureValue("monthly_revenue", event.target.value)}
+                />
+              </label>
+              <label>
+                Payment Delay Count
+                <input
+                  type="number"
+                  value={featureValues["payment_delay_count"] ?? ""}
+                  onChange={(event) => updateFeatureValue("payment_delay_count", event.target.value)}
+                />
+              </label>
+
+              <button className="primary-button full-width" type="submit" disabled={loading || !activePlan}>
+                {loading ? "Running prediction..." : "Run Prediction"}
+              </button>
+            </form>
           </div>
 
-          {result ? (
-            <div className="result-stack">
-              <div className={`result-badge ${result.risk_label === "High Risk" ? "danger" : "success"}`}>
-                {result.risk_label}
-              </div>
-              <div className="result-grid">
-                <div>
-                  <span>Probability</span>
-                  <strong>{(result.probability * 100).toFixed(2)}%</strong>
-                </div>
-                <div>
-                  <span>Prediction</span>
-                  <strong>{result.prediction === 1 ? "Churn" : "Not Churn"}</strong>
-                </div>
-                <div>
-                  <span>Model</span>
-                  <strong>{result.model_name}</strong>
-                </div>
-              </div>
-
-              <div className="result-callout">
-                <div>
-                  <span>Threshold</span>
-                  <strong>{result.threshold.toFixed(2)}</strong>
-                </div>
-                <div>
-                  <span>Plan type</span>
-                  <strong>{result.plan_type}</strong>
-                </div>
-                <div>
-                  <span>Selected features</span>
-                  <strong>{result.selected_features.length}</strong>
-                </div>
-              </div>
-
-              <div className="result-meta">
-                <p><strong>Missing features:</strong> {result.missing_features.length ? result.missing_features.join(", ") : "None"}</p>
-                <p><strong>Used features:</strong> {Object.keys(result.used_features).join(", ")}</p>
+          <div className="surface-card response-panel">
+            <div className="panel-header">
+              <div>
+                <p className="card-kicker">Prediction Response</p>
+                <h2>Model output</h2>
               </div>
             </div>
-          ) : (
-            <div className="empty-state">
-              <p>Hasil prediksi akan muncul di sini setelah request dikirim ke FastAPI.</p>
-            </div>
-          )}
+
+            {result ? (
+              <div className="response-grid">
+                <div className="response-card-top">
+                  <div className="response-metric">
+                    <span>Probability</span>
+                    <strong>{(result.probability * 100).toFixed(2)}%</strong>
+                  </div>
+                  <div className="response-metric">
+                    <span>Prediction</span>
+                    <strong>{result.prediction === 1 ? "Churn" : "Not Churn"}</strong>
+                  </div>
+                  <div className="response-metric">
+                    <span>Model</span>
+                    <strong>{result.model_name}</strong>
+                  </div>
+                </div>
+
+                <div className="response-info-row">
+                  <div>
+                    <span>Threshold</span>
+                    <strong>{result.threshold.toFixed(2)}</strong>
+                  </div>
+                  <div>
+                    <span>Plan Type</span>
+                    <strong>{result.plan_type}</strong>
+                  </div>
+                  <div>
+                    <span>Selected Features</span>
+                    <strong>{result.selected_features.length}</strong>
+                  </div>
+                </div>
+
+                <div className="result-summary">
+                  <p><strong>Missing features:</strong> {result.missing_features.length ? result.missing_features.join(", ") : "None"}</p>
+                  <p><strong>Used features:</strong> {Object.keys(result.used_features).join(", ")}</p>
+                </div>
+              </div>
+            ) : (
+              <div className="empty-state">
+                <p>Hasil prediksi akan muncul di sini setelah request dikirim ke FastAPI.</p>
+              </div>
+            )}
+          </div>
         </div>
       </section>
     </main>
