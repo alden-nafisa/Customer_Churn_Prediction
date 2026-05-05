@@ -4,11 +4,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const navItems = [
-  { label: "Dashboard", icon: "🏠", href: "/" },
+  { label: "Dashboard", icon: "⌂", href: "/" },
+  { label: "Customer Prediction", icon: "👥", href: "/customer-prediction" },
   { label: "Advance Analysis", icon: "📊", href: "/advance-analysis" },
-  { label: "Data Management", icon: "📁", href: "/data-management" },
-  { label: "Customer Prediction", icon: "👥", href: "/" },
-  { label: "Reports", icon: "✉️", href: "/data-management" },
+  { label: "Data Management", icon: "🗂️", href: "/data-management" },
 ];
 
 export default function Sidebar() {

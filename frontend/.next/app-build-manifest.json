@@ -16,6 +16,11 @@
       "static/chunks/main-app.js",
       "static/chunks/app/not-found.js"
     ],
+    "/customer-prediction/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/customer-prediction/page.js"
+    ],
     "/advance-analysis/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
