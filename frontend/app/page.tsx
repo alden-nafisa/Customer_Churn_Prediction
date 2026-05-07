@@ -37,30 +37,30 @@ export default function Home() {
   const [feedbackTab, setFeedbackTab] = useState<DashboardTab>("Month");
 
   return (
-    <main className="dashboard-page">
-      <section className="dashboard-topbar surface-card">
-        <div className="topbar-left">
-          <button className="icon-button" type="button">☰</button>
-          <h1>Dashboard</h1>
+    <main className="dashboard-page min-h-screen bg-slate-50 p-8">
+      <section className="dashboard-topbar surface-card flex items-center justify-between p-4 mb-6 bg-white/90 shadow-sm rounded-2xl">
+        <div className="topbar-left flex items-center gap-4">
+          <button className="icon-button px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200" type="button">☰</button>
+          <h1 className="text-2xl font-semibold">Dashboard</h1>
         </div>
-        <div className="topbar-actions">
-          <button className="icon-button" type="button">🔍</button>
-          <button className="icon-button" type="button">⟳</button>
+        <div className="topbar-actions flex items-center gap-2">
+          <button className="icon-button px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200" type="button">🔍</button>
+          <button className="icon-button px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200" type="button">⟳</button>
         </div>
       </section>
 
-      <section className="metrics-row">
+      <section className="metrics-row grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         {metricCards.map((metric) => (
-          <article key={metric.label} className="metric-card surface-card">
-            <span className="metric-label">{metric.label}</span>
-            <strong>{metric.value}</strong>
-            <p className="metric-note">{metric.note}</p>
+          <article key={metric.label} className="metric-card bg-white/90 p-6 rounded-2xl shadow-sm border border-slate-100">
+            <span className="metric-label text-sm text-slate-500">{metric.label}</span>
+            <strong className="block text-2xl mt-2">{metric.value}</strong>
+            <p className="metric-note text-sm text-slate-400 mt-1">{metric.note}</p>
           </article>
         ))}
       </section>
 
-      <section className="dashboard-grid">
-        <section className="surface-card churn-panel">
+      <section className="dashboard-grid grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <section className="surface-card churn-panel lg:col-span-1 bg-white/90 p-6 rounded-2xl border border-slate-100 shadow-sm">
           <div className="panel-header">
             <div>
               <p className="card-kicker">Customer Churn</p>
@@ -107,7 +107,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="surface-card feedback-panel">
+        <section className="surface-card feedback-panel lg:col-span-1 bg-white/90 p-6 rounded-2xl border border-slate-100 shadow-sm">
           <div className="panel-header">
             <div>
               <p className="card-kicker">Feedback Customer</p>

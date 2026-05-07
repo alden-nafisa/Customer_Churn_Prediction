@@ -1,6 +1,4 @@
 {
   "/page": "app/page.js",
-  "/customer-prediction/page": "app/customer-prediction/page.js",
-  "/advance-analysis/page": "app/advance-analysis/page.js",
-  "/data-management/page": "app/data-management/page.js"
+  "/prediction/page": "app/prediction/page.js"
 }

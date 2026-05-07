@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import styles from "./Sidebar.module.css";
 
 const navItems = [
   { label: "Dashboard", icon: "⌂", href: "/" },
-  { label: "Customer Prediction", icon: "👥", href: "/customer-prediction" },
+  { label: "Customer Prediction", icon: "👥", href: "/prediction" },
   { label: "Advance Analysis", icon: "📊", href: "/advance-analysis" },
   { label: "Data Management", icon: "🗂️", href: "/data-management" },
 ];
@@ -14,70 +15,52 @@ export default function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="app-sidebar">
-      <div className="sidebar-top">
-        <div className="logo-wrap">
-          <div className="logo-mark">LA</div>
-          <div className="logo-text">
-            <strong>LapisAI</strong>
-            <div className="muted">Welcome, Admin</div>
+    <aside className={styles.sidebar}>
+      <div className={styles.navColumn}>
+        <Link href="/" className={`${styles.navBtn} ${pathname === '/' ? 'active' : ''}`}>
+          <img src="/assets/icon_dashboard.svg" alt="Dashboard" style={{ width: 20, height: 20 }} />
+        </Link>
+        <Link href="/prediction" className={`${styles.navBtn} ${pathname === '/prediction' ? 'active' : ''}`}>
+          <img src="/assets/icon_churn_prediction.svg" alt="Churn" style={{ width: 20, height: 20 }} />
+        </Link>
+        <Link href="/advance-analysis" className={`${styles.navBtn} ${pathname === '/advance-analysis' ? 'active' : ''}`}>
+          <img src="/assets/icon_advance_analysis.svg" alt="Advance" style={{ width: 20, height: 20 }} />
+        </Link>
+        <Link href="/data-management" className={`${styles.navBtn} ${pathname === '/data-management' ? 'active' : ''}`}>
+          <img src="/assets/icon_data_management.svg" alt="Data" style={{ width: 20, height: 20 }} />
+        </Link>
+        <a href="#" className={styles.navBtn} title="Sign out">
+          <img src="/assets/icon_profile.svg" alt="Profile" style={{ width: 20, height: 20 }} />
+        </a>
+      </div>
+
+      <div className={styles.infoPanel}>
+        <div className={styles.logoWrap}>
+          <img src="/assets/logo-lapisai.png" alt="LapisAI" style={{ width: 140 }} />
+        </div>
+
+        <div className="sidebar-body">
+          <div className="log-feed">
+            <h4>Log System & Machine Learning</h4>
+            <ul>
+              <li className={styles.logItem}><strong>Model Retrained</strong><div className={styles.muted}>XGBoost accuracy increased</div></li>
+              <li className={styles.logItem}><strong>Data Sync</strong><div className={styles.muted}>500 new rows synced</div></li>
+              <li className={styles.logItem}><strong>Auto-Action</strong><div className={styles.muted}>Retention email sent</div></li>
+            </ul>
+          </div>
+
+          <div className="high-risk">
+            <h5>HIGH-RISK ALERT</h5>
+            <ul>
+              <li className={styles.logItem}><strong>C-0992 (Enterprise)</strong><div className={styles.muted}>Probabilitas naik ke 85%</div></li>
+              <li className={styles.logItem}><strong>C-0112 (Professional)</strong><div className={styles.muted}>3 tiket komplain</div></li>
+            </ul>
           </div>
         </div>
 
-        <nav className="main-nav">
-          {navItems.map((item) => (
-            <Link
-              key={item.label}
-              href={item.href}
-              className={`nav-btn ${pathname === item.href ? "active" : ""}`}
-              title={item.label}
-            >
-              <span>{item.icon}</span>
-            </Link>
-          ))}
-        </nav>
-      </div>
-
-      <div className="sidebar-body">
-        <div className="log-feed">
-          <h4>Log System & Machine Learning</h4>
-          <ul>
-            <li>
-              <strong>Model Retrained</strong>
-              <div className="muted">XGBoost model accuracy increased to 92.4%</div>
-            </li>
-            <li>
-              <strong>Data Sync</strong>
-              <div className="muted">500 new rows synced from Supabase</div>
-            </li>
-            <li>
-              <strong>Auto-Action</strong>
-              <div className="muted">Retention email sent to 5 Enterprise clients</div>
-            </li>
-          </ul>
+        <div className="sidebar-foot">
+          <small className={styles.muted}>Version 1.0 • Refresh</small>
         </div>
-
-        <div className="high-risk">
-          <h5>HIGH-RISK ALERT</h5>
-          <ul>
-            <li>
-              <strong>C-0992 (Enterprise)</strong>
-              <div className="muted">Probabilitas churn naik ke 85%. Segera tawarkan diskon.</div>
-            </li>
-            <li>
-              <strong>C-0112 (Professional)</strong>
-              <div className="muted">Mengirimkan 3 tiket komplain hari ini.</div>
-            </li>
-            <li>
-              <strong>C-0091 (Starter)</strong>
-              <div className="muted">Review sentiment negatif meningkat.</div>
-            </li>
-          </ul>
-        </div>
-      </div>
-
-      <div className="sidebar-foot">
-        <small className="muted">Live sync • High-risk dashboard</small>
       </div>
     </aside>
   );
