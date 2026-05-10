@@ -16,11 +16,10 @@
       "static/chunks/main-app.js",
       "static/chunks/app/not-found.js"
     ],
-    "/prediction/page": [
+    "/advance-analysis/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/css/app/prediction/page.css",
-      "static/chunks/app/prediction/page.js"
+      "static/chunks/app/advance-analysis/page.js"
     ]
   }
 }
