@@ -1,0 +1,41 @@
+================================================================================
+PHASE 1 OPTIMIZATION RESULTS
+================================================================================
+
+ENSEMBLE WEIGHT OPTIMIZATION RESULTS
+--------------------------------------------------------------------------------
+Current Performance (60/40): F1 = 0.4957, AUC = 0.6737
+
+Best Weights Found: 65% XGBoost + 35% CatBoost
+Best F1-Score: 0.4963
+Improvement: +0.06%
+
+All tested weight combinations:
+ xgb_weight  cat_weight  f1_score      auc  precision   recall
+       0.50        0.50  0.494710 0.673739   0.367898 0.754929
+       0.55        0.45  0.495472 0.673782   0.369149 0.753229
+       0.60        0.40  0.495684 0.673749   0.369794 0.751530
+       0.65        0.35  0.496342 0.673644   0.371025 0.749490
+       0.70        0.30  0.494913 0.673467   0.370766 0.744052
+       0.75        0.25  0.494607 0.673189   0.371355 0.740313
+
+OUTLIER HANDLING ANALYSIS
+--------------------------------------------------------------------------------
+Comparison of 1.5x vs 1.0x IQR outlier bounds:
+
+           feature  outliers_1.5x  outliers_1.0x  removed_by_stricter  pct_removed
+PercChangeRevenues           2630           3112                 -482    -4.720862
+      RoamingCalls           1892           2132                 -240    -2.350637
+  CallWaitingCalls           1481           1798                 -317    -3.104799
+ PercChangeMinutes           1353           1968                 -615    -6.023506
+ CustomerCareCalls           1360           1579                 -219    -2.144956
+
+Total outliers that would be removed: -1873
+Percentage of validation set: -18.34%
+
+RECOMMENDATIONS
+--------------------------------------------------------------------------------
+1. Update ensemble weights to: 65% XGBoost + 35% CatBoost
+2. Apply stricter outlier handling (1.0x IQR) for top features
+3. Maintain threshold at 0.25 (already optimal)
+4. Proceed to Phase 2 hyperparameter tuning for further improvements

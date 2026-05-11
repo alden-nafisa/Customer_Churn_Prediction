@@ -1,0 +1,56 @@
+================================================================================
+DETAILED MODEL INSIGHTS & OPTIMIZATION OPPORTUNITIES
+Focus: XGBoost + CatBoost Ensemble
+================================================================================
+
+FEATURE IMPORTANCE
+--------------------------------------------------------------------------------
+
+
+XGBoost - Top 25 Features:
+feature  importance_pct
+     f1       21.079430
+     f2       20.570265
+     f4       18.584521
+     f0       16.420570
+     f3       11.176171
+     f5        9.495927
+     f6        2.291242
+     f7        0.381874
+
+
+OUTLIER ANALYSIS
+--------------------------------------------------------------------------------
+                   Column  Outliers_Count  Outliers_Percentage      Min     Max     Q1      Q3
+       PercChangeRevenues           13221            25.899661 -1107.70 2483.50  -7.10   1.600
+             RoamingCalls            8835            17.307579     0.00 1112.40   0.00   0.300
+         CallWaitingCalls            7448            14.590475     0.00  212.70   0.00   1.300
+        PercChangeMinutes            6807            13.334770 -3875.00 5192.00 -83.00  66.000
+        CustomerCareCalls            6721            13.166298     0.00  327.30   0.00   1.700
+           OverageMinutes            5842            11.444355     0.00 4321.00   0.00  41.000
+    DirectorAssistedCalls            5530            10.833154     0.00  159.39   0.00   0.990
+             BlockedCalls            5517            10.807687     0.00  384.30   0.00   3.700
+             InboundCalls            4973             9.742002     0.00  519.30   0.00   9.300
+            ThreewayCalls            4622             9.054401     0.00   66.00   0.00   0.300
+                 Handsets            4414             8.646933     1.00   24.00   1.00   2.000
+      DroppedBlockedCalls            3936             7.710541     0.00  411.70   1.70  12.300
+             DroppedCalls            3712             7.271730     0.00  221.70   0.70   7.700
+            ReceivedCalls            3641             7.132642     0.00 2692.40   8.30 153.500
+          UnansweredCalls            3630             7.111094     0.00  848.70   5.30  36.300
+        OffPeakCallsInOut            3624             7.099340     0.00 1474.70  11.00  88.700
+            OutboundCalls            3342             6.546908     0.00  644.30   3.30  34.000
+           MonthlyRevenue            2997             5.871060    -6.17 1223.38  33.61  71.065
+           PeakCallsInOut            2803             5.491018     0.00 2090.70  23.00 121.300
+           MonthlyMinutes            2567             5.028699     0.00 7359.00 158.00 723.000
+ReferralsMadeBySubscriber            2384             4.670206     0.00   35.00   0.00   0.000
+            HandsetModels            2008             3.933630     1.00   15.00   1.00   2.000
+               UniqueSubs            1874             3.671127     1.00  196.00   1.00   2.000
+AdjustmentsToCreditRating            1838             3.600603     0.00   25.00   0.00   0.000
+           RetentionCalls            1745             3.418418     0.00    4.00   0.00   0.000
+     CurrentEquipmentDays            1446             2.832684    -5.00 1812.00 205.00 515.000
+          MonthsInService            1218             2.386036     6.00   61.00  11.00  24.000
+  RetentionOffersAccepted             881             1.725860     0.00    3.00   0.00   0.000
+     TotalRecurringCharge             824             1.614199   -11.00  400.00  30.00  60.000
+               ActiveSubs             611             1.196936     0.00   53.00   1.00   2.000
+      CallForwardingCalls             234             0.458401     0.00   81.30   0.00   0.000
+
