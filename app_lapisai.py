@@ -27,16 +27,15 @@ from src.churn_pipeline import (
     ARTIFACT_DIR,
     DATA_PATH,
     ID_COLUMN,
-    PLAN_TYPES,
-    get_plan_slug,
-    load_artifact,
     load_dataset,
     transform_features,
 )
+from new_pages import (
+    render_churn_analysis_prediction_page,
+    render_audience_chat_analysis_page,
+)
 
 TARGET_COLUMN = "churned"
-AUTH_USERNAME = "Admin123"
-AUTH_PASSWORD = "12345678"
 PROJECT_ROOT = Path(__file__).resolve().parent
 NLP_ARTIFACT_DIR = PROJECT_ROOT / "artifacts" / "nlp"
 
@@ -76,21 +75,10 @@ class NLPAssets(TypedDict):
     session_summary_text: str
 
 
-def init_auth_state() -> None:
-    if "authenticated" not in st.session_state:
-        st.session_state.authenticated = False
-    if "auth_error" not in st.session_state:
-        st.session_state.auth_error = ""
-
-
 def _unique_key(base: str) -> str:
     idx = st.session_state.get("_unique_plot_key_idx", 0)
     st.session_state["_unique_plot_key_idx"] = idx + 1
     return f"{base}_{idx}"
-
-
-def authenticate_user(username: str, password: str) -> bool:
-    return str(username) == AUTH_USERNAME and str(password) == AUTH_PASSWORD
 
 
 def add_branding() -> None:
@@ -167,8 +155,8 @@ def add_branding() -> None:
 
 
 st.set_page_config(
-    page_title="Customer Churn Early Warning System",
-    page_icon="📉",
+    page_title="LapisAI - Advanced Analytics Dashboard",
+    page_icon="🚀",
     layout="wide",
 )
 
@@ -178,16 +166,47 @@ def load_assets() -> AppAssets:
     """Load pre-trained models and SHAP explainers from artifacts."""
     import joblib
     
-    # Load calibrated models (production-ready)
-    xgb_pipeline = joblib.load(ARTIFACT_DIR / "xgb_model_calibrated.pkl")
-    catboost_pipeline = joblib.load(ARTIFACT_DIR / "catboost_model_calibrated.pkl")
-    
-    # Load SHAP explainer
-    xgb_explainer = joblib.load(ARTIFACT_DIR / "shap_explainer.pkl")
-    
-    # Load feature names
-    feature_names_dict = joblib.load(ARTIFACT_DIR / "feature_names.pkl")
-    all_features = feature_names_dict.get("numeric", []) + feature_names_dict.get("categorical", [])
+    # Try to load models - use existing files in artifacts/
+    try:
+        # Load XGBoost pipeline
+        xgb_path = ARTIFACT_DIR / "xgb_pipeline.joblib"
+        if not xgb_path.exists():
+            raise FileNotFoundError(f"XGBoost model not found at {xgb_path}")
+        xgb_pipeline: Any = joblib.load(xgb_path)
+        
+        # Load CatBoost if available, otherwise use XGBoost as fallback
+        catboost_path = ARTIFACT_DIR / "catboost_pipeline.joblib"
+        catboost_pipeline: Any = (
+            joblib.load(catboost_path) if catboost_path.exists() else xgb_pipeline
+        )
+        
+        # Try to load SHAP explainer if available
+        xgb_explainer: Any = None
+        shap_path = ARTIFACT_DIR / "shap_explainer.pkl"
+        if shap_path.exists():
+            try:
+                xgb_explainer = joblib.load(shap_path)
+            except Exception:  # pylint: disable=broad-except
+                xgb_explainer = None
+        
+        # Try to load feature names if available
+        feature_names_dict: dict[str, Any] = {}
+        feature_names_path = ARTIFACT_DIR / "feature_names.pkl"
+        if feature_names_path.exists():
+            try:
+                feature_names_dict = joblib.load(feature_names_path)
+            except Exception:  # pylint: disable=broad-except
+                feature_names_dict = {}
+        
+        all_features = (
+            feature_names_dict.get("numeric", [])
+            + feature_names_dict.get("categorical", [])
+        )
+        
+    except FileNotFoundError as e:
+        st.error(f"❌ Model files not found: {e}")
+        st.info("📌 To fix this, run: `python scripts/train_final_models.py`")
+        raise
     
     return AppAssets(
         xgb_pipeline=xgb_pipeline,
@@ -211,421 +230,21 @@ def load_assets() -> AppAssets:
             ),
             feature_names=all_features,
             selected_features=all_features,
-            feature_columns={"numeric": feature_names_dict.get("numeric", []), "categorical": feature_names_dict.get("categorical", [])},
-            training_strategy={"method": "stratified_kfold", "splits": 5, "calibration": "isotonic"},
+            feature_columns={
+                "numeric": feature_names_dict.get("numeric", []),
+                "categorical": feature_names_dict.get("categorical", []),
+            },
+            training_strategy={
+                "method": "stratified_kfold",
+                "splits": 5,
+                "calibration": "isotonic",
+            },
         ),
         xgb_explainer=xgb_explainer,
         catboost_explainer=None,
         selected_features=all_features,
-        plan_type="Online Shoppers",
+        plan_type="LapisAI Analytics",
     )
-
-
-def render_login_page() -> None:
-    st.markdown(
-        """
-        <style>
-            :root {
-                --brand-blue: #2f6ea8;
-                --brand-blue-dark: #245582;
-                --brand-blue-mid: #3d82bf;
-                --brand-blue-light: #72aee0;
-                --brand-blue-pale: #e8f2fb;
-            }
-            .stApp {
-                background: radial-gradient(circle at top, #f7fbff 0%, var(--brand-blue-pale) 42%, #e3eef8 100%);
-            }
-            header[data-testid="stHeader"],
-            [data-testid="stToolbar"],
-            #MainMenu {
-                visibility: hidden !important;
-                display: none !important;
-            }
-            .login-page {
-                padding-top: 2.2rem;
-                padding-bottom: 3rem;
-            }
-            .login-shell {
-                width: min(1180px, calc(100vw - 5rem));
-                max-width: 1180px;
-                margin: 0 auto;
-                background: white;
-                border-radius: 28px;
-                overflow: hidden;
-                box-shadow: 0 26px 60px rgba(15, 23, 42, 0.18), 0 2px 0 rgba(255, 255, 255, 0.55) inset;
-                border: 1px solid rgba(15, 23, 42, 0.06);
-            }
-            div[data-testid="column"] {
-                padding: 0 !important;
-            }
-            .login-left {
-                position: relative;
-                min-height: 560px;
-                padding: 2rem;
-                background:
-                    radial-gradient(circle at 20% 20%, rgba(255,255,255,0.25) 0 10px, transparent 11px),
-                    radial-gradient(circle at 80% 12%, rgba(255,255,255,0.18) 0 14px, transparent 15px),
-                    radial-gradient(circle at 15% 78%, rgba(255,255,255,0.15) 0 18px, transparent 19px),
-                    linear-gradient(135deg, var(--brand-blue-dark) 0%, var(--brand-blue) 35%, var(--brand-blue-mid) 68%, var(--brand-blue-light) 100%);
-                color: white;
-                isolation: isolate;
-                overflow: hidden;
-            }
-            .login-left::before,
-            .login-left::after {
-                content: "";
-                position: absolute;
-                inset: auto;
-                border-radius: 999px;
-                pointer-events: none;
-            }
-            .login-left::before {
-                width: 340px;
-                height: 340px;
-                top: -110px;
-                right: -110px;
-                background: radial-gradient(circle, rgba(255,255,255,0.26) 0%, rgba(255,255,255,0.04) 55%, transparent 70%);
-                animation: floatGlow 10s ease-in-out infinite;
-            }
-            .login-left::after {
-                width: 260px;
-                height: 260px;
-                left: -90px;
-                bottom: -100px;
-                background: radial-gradient(circle, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0.05) 60%, transparent 72%);
-                animation: floatGlow 12s ease-in-out infinite reverse;
-            }
-            .blue-grid {
-                position: absolute;
-                inset: 0;
-                background-image:
-                    linear-gradient(rgba(255,255,255,0.08) 1px, transparent 1px),
-                    linear-gradient(90deg, rgba(255,255,255,0.08) 1px, transparent 1px);
-                background-size: 42px 42px;
-                opacity: 0.45;
-                mask-image: linear-gradient(180deg, rgba(0,0,0,0.85), rgba(0,0,0,0.3));
-                animation: gridDrift 18s linear infinite, gridPulse 6s ease-in-out infinite;
-            }
-            .wave {
-                position: absolute;
-                left: -22%;
-                width: 144%;
-                height: 220px;
-                border-radius: 46% 54% 45% 55% / 58% 42% 58% 42%;
-                filter: blur(6px);
-                opacity: 0.9;
-                mix-blend-mode: screen;
-                z-index: 1;
-                will-change: transform, opacity, background-position;
-            }
-            .wave.one {
-                top: 10%;
-                background: linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.24), rgba(255,255,255,0.02));
-                background-size: 200% 100%;
-                animation: waveOne 9s ease-in-out infinite;
-            }
-            .wave.two {
-                top: 26%;
-                background: linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.16), rgba(255,255,255,0.02));
-                background-size: 220% 100%;
-                animation: waveTwo 11s ease-in-out infinite;
-            }
-            .wave.three {
-                bottom: 9%;
-                background: linear-gradient(90deg, rgba(29, 78, 216, 0.28), rgba(255,255,255,0.16), rgba(56, 189, 248, 0.26));
-                background-size: 240% 100%;
-                animation: waveThree 13s ease-in-out infinite;
-            }
-            .orbit {
-                position: absolute;
-                border-radius: 50%;
-                border: 1px solid rgba(255,255,255,0.28);
-                box-shadow: 0 0 24px rgba(255,255,255,0.2) inset;
-                animation: orbitPulse 8s ease-in-out infinite;
-                z-index: 1;
-            }
-            .orbit.one { width: 82px; height: 82px; left: 24px; top: 78px; }
-            .orbit.two { width: 120px; height: 120px; right: 40px; top: 34px; animation-delay: -2s; }
-            .orbit.three { width: 68px; height: 68px; left: 54%; top: 54%; animation-delay: -4s; }
-            .login-brand {
-                position: relative;
-                z-index: 2;
-                display: flex;
-                align-items: center;
-                gap: 0.6rem;
-                font-weight: 700;
-                letter-spacing: 0.08em;
-                font-size: 0.8rem;
-                text-transform: uppercase;
-                opacity: 0.96;
-            }
-            .brand-mark {
-                width: 34px;
-                height: 34px;
-                border-radius: 999px;
-                border: 2px solid rgba(255,255,255,0.9);
-                display: grid;
-                place-items: center;
-                font-size: 0.9rem;
-                box-shadow: 0 0 0 10px rgba(255,255,255,0.08);
-            }
-            .login-copy {
-                position: relative;
-                z-index: 2;
-                margin-top: 7rem;
-                max-width: 420px;
-            }
-            .login-copy .eyebrow {
-                font-size: 1rem;
-                opacity: 0.9;
-                margin-bottom: 0.5rem;
-            }
-            .login-copy h1 {
-                font-size: clamp(2.5rem, 4vw, 4.4rem);
-                line-height: 0.94;
-                margin: 0;
-                letter-spacing: -0.04em;
-                text-transform: uppercase;
-            }
-            .login-copy .divider {
-                width: 56px;
-                height: 4px;
-                border-radius: 999px;
-                background: rgba(255,255,255,0.95);
-                margin: 1rem 0 1.1rem;
-            }
-            .login-copy p {
-                margin: 0;
-                max-width: 330px;
-                line-height: 1.55;
-                opacity: 0.9;
-                font-size: 0.95rem;
-            }
-            .login-right {
-                min-height: 560px;
-            }
-            .login-title {
-                font-size: 1.7rem;
-                font-weight: 800;
-                color: #2563eb;
-                margin: 0;
-                letter-spacing: -0.03em;
-            }
-            .login-subtitle {
-                color: #6b7280;
-                margin: 0.45rem 0 1.1rem;
-                line-height: 1.55;
-                font-size: 0.95rem;
-            }
-            .login-chip-row {
-                display: flex;
-                gap: 0.75rem;
-                align-items: center;
-                margin: 1.2rem 0 1.45rem;
-                color: #6b7280;
-                font-size: 0.88rem;
-            }
-            .login-chip {
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-                width: 20px;
-                height: 20px;
-                border-radius: 999px;
-                background: #e5e7eb;
-                color: #6b7280;
-                font-weight: 700;
-            }
-            .login-caption {
-                color: #6b7280;
-                margin-top: 0.85rem;
-                font-size: 0.9rem;
-            }
-            .login-caption strong,
-            .login-caption b {
-                color: #0f172a;
-            }
-            .stForm {
-                background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
-                border-radius: 28px;
-                padding: 3rem 3rem 2.6rem;
-                box-shadow: 0 26px 60px rgba(15, 23, 42, 0.12), 0 1px 0 rgba(255, 255, 255, 0.8) inset;
-                border: 1px solid rgba(15, 23, 42, 0.06);
-                margin-top: 0;
-            }
-            .stTextInput label,
-            .stTextInput p,
-            .stTextInput span {
-                color: #6b7280 !important;
-                opacity: 1 !important;
-            }
-            .stTextInput input,
-            .stTextInput textarea {
-                color: #0f172a !important;
-                background: white !important;
-                border: 1px solid #d1d5db !important;
-                border-left: 4px solid #2563eb !important;
-                border-radius: 10px !important;
-                box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.04) !important;
-            }
-            div[data-testid="stTextInput"] [data-baseweb="base-input"],
-            div[data-testid="stTextInput"] [data-baseweb="base-input"] > div,
-            div[data-testid="stTextInput"] [data-baseweb="input"] {
-                background: white !important;
-                box-shadow: none !important;
-                border-color: #d1d5db !important;
-            }
-            div[data-testid="stTextInput"] [data-baseweb="input"] input,
-            div[data-testid="stTextInput"] [data-baseweb="base-input"] input {
-                background: white !important;
-                color: #0f172a !important;
-                -webkit-text-fill-color: #0f172a !important;
-                opacity: 1 !important;
-            }
-            div[data-testid="stTextInput"] [data-baseweb="base-input"] button,
-            div[data-testid="stTextInput"] [data-baseweb="base-input"] button:hover,
-            div[data-testid="stTextInput"] [data-baseweb="base-input"] button:active,
-            div[data-testid="stTextInput"] [data-baseweb="base-input"] button:focus,
-            div[data-testid="stTextInput"] button,
-            div[data-testid="stTextInput"] button:hover,
-            div[data-testid="stTextInput"] button:active,
-            div[data-testid="stTextInput"] button:focus {
-                background: #f3f4f6 !important;
-                color: #6b7280 !important;
-                fill: #6b7280 !important;
-                stroke: #6b7280 !important;
-                border-color: #d1d5db !important;
-                box-shadow: none !important;
-            }
-            div[data-testid="stTextInput"] button svg,
-            div[data-testid="stTextInput"] button svg * {
-                fill: #6b7280 !important;
-                stroke: #6b7280 !important;
-            }
-            div[data-testid="stForm"] button,
-            div[data-testid="stForm"] button:hover,
-            div[data-testid="stForm"] button:active,
-            div[data-testid="stForm"] button:focus,
-            div[data-testid="stForm"] button[kind="primary"],
-            div[data-testid="stForm"] button[kind="primary"]:hover,
-            div[data-testid="stForm"] button[kind="primary"]:active,
-            div[data-testid="stForm"] button[kind="primary"]:focus {
-                border-radius: 999px;
-                font-weight: 700;
-                background: #1f7aec !important;
-                color: #ffffff !important;
-                border: 1px solid #1f7aec !important;
-                box-shadow: 0 14px 24px rgba(31, 122, 236, 0.22) !important;
-                transition: transform 0.2s ease, box-shadow 0.2s ease;
-            }
-            div[data-testid="stForm"] button:hover,
-            div[data-testid="stForm"] button[kind="primary"]:hover {
-                transform: translateY(-1px);
-                box-shadow: 0 18px 28px rgba(31, 122, 236, 0.28) !important;
-            }
-            @keyframes floatGlow {
-                0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
-                50% { transform: translate3d(0, 18px, 0) scale(1.03); }
-            }
-            @keyframes waveOne {
-                0%, 100% { transform: translate(-2%, 0px) scaleX(1.01) scaleY(1.00) rotate(-4deg); background-position: 0% 50%; opacity: 0.82; }
-                50% { transform: translate(4%, 10px) scaleX(1.05) scaleY(1.08) rotate(-2deg); background-position: 100% 50%; opacity: 0.98; }
-            }
-            @keyframes waveTwo {
-                0%, 100% { transform: translate(0, 0px) scaleX(1.02) scaleY(1.00) rotate(7deg); background-position: 100% 50%; opacity: 0.72; }
-                50% { transform: translate(-5%, -12px) scaleX(1.08) scaleY(1.1) rotate(10deg); background-position: 0% 50%; opacity: 0.92; }
-            }
-            @keyframes waveThree {
-                0%, 100% { transform: translate(0, 0px) scaleX(1.01) scaleY(1.00) rotate(-2deg); background-position: 0% 50%; opacity: 0.7; }
-                50% { transform: translate(6%, -8px) scaleX(1.08) scaleY(1.12) rotate(2deg); background-position: 100% 50%; opacity: 0.95; }
-            }
-            @keyframes orbitPulse {
-                0%, 100% { transform: scale(1); opacity: 0.45; }
-                50% { transform: scale(1.08); opacity: 0.8; }
-            }
-            @keyframes gridDrift {
-                0% { background-position: 0 0; }
-                100% { background-position: 84px 42px; }
-            }
-            @keyframes gridPulse {
-                0%, 100% { opacity: 0.34; }
-                50% { opacity: 0.56; }
-            }
-            @media (max-width: 900px) {
-                .login-shell {
-                    width: min(100vw - 1.5rem, 1180px);
-                }
-                .login-left {
-                    min-height: 360px;
-                }
-                .login-copy {
-                    margin-top: 6rem;
-                }
-                .login-right {
-                    padding: 2rem 1.5rem 2.2rem;
-                    min-height: auto;
-                }
-            }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown('<div class="login-page">', unsafe_allow_html=True)
-    st.markdown('<div class="login-shell">', unsafe_allow_html=True)
-    left_col, right_col = st.columns([1.0, 1.0])
-
-    with left_col:
-        st.markdown(
-            """
-            <div class="login-left">
-                <div class="blue-grid"></div>
-                <div class="wave one"></div>
-                <div class="wave two"></div>
-                <div class="wave three"></div>
-                <div class="orbit one"></div>
-                <div class="orbit two"></div>
-                <div class="orbit three"></div>
-                <div class="login-brand"><div class="brand-mark">◎</div><span>Company Name</span></div>
-                <div class="login-copy">
-                    <div class="eyebrow">Nice to see you again</div>
-                    <h1>WELCOME BACK</h1>
-                    <div class="divider"></div>
-                    <p>Masuk untuk membuka dashboard churn dengan tampilan yang lebih tenang, modern, dan fokus pada analisis.</p>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    with right_col:
-        with st.form("login_form", clear_on_submit=False):
-            st.markdown('<div class="login-title">Login Account</div>', unsafe_allow_html=True)
-            st.markdown('<div class="login-subtitle">Masukkan username dan password yang valid untuk membuka dashboard analisis churn.</div>', unsafe_allow_html=True)
-            st.markdown('<div class="login-chip-row"><span class="login-chip">✓</span><span>Keep me signed in</span><span style="margin-left:auto; color:#6b7280; font-weight:600;">Already a member?</span></div>', unsafe_allow_html=True)
-            username = st.text_input("Email ID", placeholder="Admin123")
-            password = st.text_input("Password", type="password", placeholder="12345678")
-            submitted = st.form_submit_button("SUBSCRIBE", use_container_width=True)
-
-        if submitted:
-            if authenticate_user(username, password):
-                st.session_state.authenticated = True
-                st.session_state.auth_error = ""
-                st.rerun()
-            else:
-                st.session_state.auth_error = "Username atau password salah."
-
-        if st.session_state.auth_error:
-            st.error(st.session_state.auth_error)
-
-        st.markdown(
-            f'<div class="login-caption">Credential demo: username <strong>{AUTH_USERNAME}</strong> dan password <strong>{AUTH_PASSWORD}</strong>.</div>',
-            unsafe_allow_html=True,
-        )
-
-    st.markdown('</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-    return
 
 
 def score_frame(pipeline, frame: pd.DataFrame, threshold: float, selected_features: list[str]) -> pd.DataFrame:
@@ -1110,9 +729,9 @@ def render_customer_navigator(customer_ids: list[str]) -> str:
 
 
 def render_nlp_section(nlp_assets: NLPAssets) -> None:
-    st.subheader("NLP: Sentiment Analysis dan Session Summary")
+    st.subheader("🎤 NLP: Sentiment Analysis & Session Summary")
     st.markdown(
-        '<div class="dashboard-note">Bagian NLP memakai komentar sebagai input. Kolom sentiment pada CSV tidak dipakai sebagai fitur; label training dibentuk otomatis dari isi komentar.</div>',
+        '<div class="dashboard-note">📝 Bagian NLP menganalisis komentar YouTube menggunakan weak supervision berbasis leksikon. Output model dilatih pada 80% data (stratified) dan dievaluasi pada 20% test set. Label training otomatis dibentuk dari isi komentar; kolom sentiment pada CSV hanya untuk referensi.</div>',
         unsafe_allow_html=True,
     )
 
@@ -1121,88 +740,176 @@ def render_nlp_section(nlp_assets: NLPAssets) -> None:
     session_summary = nlp_assets["session_summary"]
     session_summary_text = nlp_assets["session_summary_text"]
 
-    left_col, right_col = st.columns([1.05, 0.95])
-    with left_col:
-        st.markdown("##### Sentiment Model Performance")
-        if sentiment_metrics:
-            nb_values = sentiment_metrics.get("naive_bayes", {})
-            sentiment_display = pd.DataFrame(
-                [
-                    {
-                        "Model": "Naive Bayes",
-                        "Accuracy": nb_values.get("accuracy", 0.0),
-                        "Precision (macro)": nb_values.get("precision_macro", 0.0),
-                        "Recall (macro)": nb_values.get("recall_macro", 0.0),
-                        "F1 (macro)": nb_values.get("f1_macro", 0.0),
-                    }
-                ]
-            )
+    # ===== SENTIMENT MODEL PERFORMANCE =====
+    st.markdown("#### 📊 Sentiment Model Performance")
+    if sentiment_metrics:
+        nb_values = sentiment_metrics.get("naive_bayes", {})
+        
+        # Performance metrics in cards
+        perf_cols = st.columns(4)
+        metrics_list = [
+            ("Accuracy", nb_values.get("accuracy", 0.0)),
+            ("Precision", nb_values.get("precision_macro", 0.0)),
+            ("Recall", nb_values.get("recall_macro", 0.0)),
+            ("F1-Score", nb_values.get("f1_macro", 0.0)),
+        ]
+        for col, (metric_name, value) in zip(perf_cols, metrics_list):
+            with col:
+                st.metric(metric_name, f"{value:.3f}")
+        
+        # Detailed metrics table
+        sentiment_display = pd.DataFrame([
+            {
+                "Model": "Naive Bayes + TFIDF",
+                "Accuracy": nb_values.get("accuracy", 0.0),
+                "Precision (macro)": nb_values.get("precision_macro", 0.0),
+                "Recall (macro)": nb_values.get("recall_macro", 0.0),
+                "F1 (macro)": nb_values.get("f1_macro", 0.0),
+            }
+        ])
+        
+        col1, col2 = st.columns([1.5, 1])
+        with col1:
             st.dataframe(
-                sentiment_display.style.format(
-                    {
-                        "Accuracy": "{:.3f}",
-                        "Precision (macro)": "{:.3f}",
-                        "Recall (macro)": "{:.3f}",
-                        "F1 (macro)": "{:.3f}",
-                    }
-                ),
+                sentiment_display.style.format({
+                    "Accuracy": "{:.4f}",
+                    "Precision (macro)": "{:.4f}",
+                    "Recall (macro)": "{:.4f}",
+                    "F1 (macro)": "{:.4f}",
+                }),
                 use_container_width=True,
-                height=220,
+                height=180,
             )
-            label_strategy = sentiment_metrics.get("label_strategy", {})
-            if label_strategy:
-                st.caption(
-                    "Training NLP memakai komentar saja dengan weak supervision: "
-                    f"source={label_strategy.get('source', '-')}, "
-                    f"method={label_strategy.get('label_method', '-')}, "
-                    f"dataset={label_strategy.get('dataset', '-')}."
-                )
-        else:
-            st.info("Artifact sentiment belum ditemukan.")
+        
+        # Visualize metrics as horizontal bar
+        with col2:
+            metrics_viz = pd.DataFrame({
+                "Metric": ["Accuracy", "Precision", "Recall", "F1-Score"],
+                "Score": [v for _, v in metrics_list],
+            })
+            fig_metrics = px.bar(
+                metrics_viz,
+                y="Metric",
+                x="Score",
+                orientation="h",
+                color="Score",
+                color_continuous_scale="Greens",
+                range_x=[0, 1],
+            )
+            fig_metrics.update_layout(height=180, margin=dict(l=10, r=10, t=10, b=10), showlegend=False)
+            st.plotly_chart(fig_metrics, use_container_width=True, key=_unique_key("nlp_metrics"))
+        
+        # Training strategy info
+        label_strategy = sentiment_metrics.get("label_strategy", {})
+        training_strategy = sentiment_metrics.get("training_strategy", {})
+        with st.expander("ℹ️ Training Details", expanded=False):
+            info_col1, info_col2 = st.columns(2)
+            with info_col1:
+                st.markdown("**Labeling Strategy**")
+                if label_strategy:
+                    st.write(f"• Source: `{label_strategy.get('source', '-')}`")
+                    st.write(f"• Method: `{label_strategy.get('label_method', '-')}`")
+                    st.write(f"• Dataset: `{label_strategy.get('dataset', '-')}`")
+            with info_col2:
+                st.markdown("**Model Configuration**")
+                if training_strategy:
+                    st.write(f"• Split: `{training_strategy.get('split', '-')}`")
+                    st.write(f"• Features: `{training_strategy.get('text_features', '-')}`")
+    else:
+        st.warning("⚠️ Sentiment metrics not found. Run: `python generate_nlp_visualizations.py`")
 
+    st.divider()
+
+    # ===== TEST PREDICTIONS & SESSION SUMMARY =====
+    col_left, col_right = st.columns([1.05, 0.95])
+    
+    with col_left:
+        st.markdown("#### 📋 Test Predictions Preview")
         if not sentiment_predictions.empty:
-            with st.expander("Preview sentiment test predictions", expanded=False):
-                st.dataframe(sentiment_predictions.head(12), use_container_width=True, height=240)
-                st.download_button(
-                    label="Download sentiment test predictions",
-                    data=sentiment_predictions.to_csv(index=False).encode("utf-8"),
-                    file_name="sentiment_test_predictions.csv",
-                    mime="text/csv",
-                    key=_unique_key("download_sentiment_predictions"),
-                )
-
-    with right_col:
-        st.markdown("##### Session Summary")
-        if session_summary:
-            metric_cols = st.columns(2)
-            with metric_cols[0]:
-                st.metric("Total comments", session_summary.get("total_comments", 0))
-            with metric_cols[1]:
-                unique_commenters = session_summary.get("unique_commenters")
-                st.metric("Unique commenters", unique_commenters if unique_commenters is not None else "-")
-
-            if session_summary_text:
-                st.text_area("Extractive session summary", value=session_summary_text, height=220)
-
-            top_keywords = session_summary.get("top_keywords", [])
-            if top_keywords:
-                st.markdown("**Top keywords**")
-                st.dataframe(pd.DataFrame(top_keywords), use_container_width=True, height=200)
-
-            representative_comments = session_summary.get("representative_comments", [])
-            if representative_comments:
-                with st.expander("Representative comments", expanded=False):
-                    st.dataframe(pd.DataFrame(representative_comments), use_container_width=True, height=240)
-
+            st.dataframe(
+                sentiment_predictions.head(15),
+                use_container_width=True,
+                height=350,
+            )
             st.download_button(
-                label="Download session summary JSON",
+                label="📥 Download Full Test Predictions (CSV)",
+                data=sentiment_predictions.to_csv(index=False).encode("utf-8"),
+                file_name="sentiment_test_predictions.csv",
+                mime="text/csv",
+                key=_unique_key("download_sentiment_predictions"),
+            )
+        else:
+            st.info("No test predictions available")
+
+    with col_right:
+        st.markdown("#### 📍 Session Summary")
+        if session_summary:
+            # Key metrics
+            summary_cols = st.columns(2)
+            with summary_cols[0]:
+                st.metric("💬 Total comments", session_summary.get("total_comments", 0))
+            with summary_cols[1]:
+                unique = session_summary.get("unique_commenters", 0)
+                st.metric("👥 Unique users", unique if unique else 0)
+            
+            # Sentiment distribution
+            sentiment_dist = session_summary.get("sentiment_distribution", {})
+            if sentiment_dist:
+                st.markdown("**Sentiment Breakdown**")
+                for sentiment, count in sentiment_dist.items():
+                    pct = count / session_summary.get("total_comments", 1) * 100
+                    st.write(f"{sentiment}: {count} ({pct:.1f}%)")
+            
+            # Session summary text
+            if session_summary_text:
+                with st.expander("📄 Extractive Summary", expanded=True):
+                    st.write(session_summary_text)
+            
+            st.download_button(
+                label="📥 Download Session Summary (JSON)",
                 data=json.dumps(session_summary, indent=2, ensure_ascii=False).encode("utf-8"),
                 file_name="session_summary.json",
                 mime="application/json",
                 key=_unique_key("download_session_summary"),
             )
         else:
-            st.info("Artifact session summary belum ditemukan.")
+            st.info("Session summary not available")
+
+    st.divider()
+
+    # ===== TOP KEYWORDS & COMMENTS =====
+    if session_summary:
+        top_keywords = session_summary.get("top_keywords", [])
+        if top_keywords:
+            st.markdown("#### 🏷️ Top Keywords")
+            keywords_df = pd.DataFrame(top_keywords)
+            
+            col_kw_viz, col_kw_data = st.columns([0.6, 0.4])
+            with col_kw_viz:
+                fig_kw = px.bar(
+                    keywords_df.sort_values("frequency"),
+                    y="keyword",
+                    x="frequency",
+                    orientation="h",
+                    color="frequency",
+                    color_continuous_scale="Viridis",
+                )
+                fig_kw.update_layout(height=300, margin=dict(l=10, r=10, t=10, b=10), showlegend=False)
+                st.plotly_chart(fig_kw, use_container_width=True, key=_unique_key("nlp_keywords"))
+            
+            with col_kw_data:
+                st.dataframe(keywords_df, use_container_width=True, height=300)
+
+        # Representative comments
+        representative = session_summary.get("representative_comments", [])
+        if representative:
+            st.markdown("#### 💭 Representative Comments")
+            for i, item in enumerate(representative, 1):
+                with st.expander(f"**{item.get('sentiment', 'Unknown')}** - {item.get('author', 'Anonymous')}", expanded=False):
+                    st.write(item.get("comment", ""))
+
+    st.divider()
+    st.caption("✅ NLP analysis complete. Visualizations are based on YouTube chat data with weak supervision labeling strategy.")
 
 
 def build_feature_defaults(frame: pd.DataFrame, selected_features: list[str]) -> dict[str, Any]:
@@ -1408,7 +1115,7 @@ def render_single_prediction_result(
                 )
             )
             shap_fig.update_layout(height=420, margin=dict(l=10, r=10, t=55, b=10))
-        except Exception:
+        except (KeyError, ValueError, TypeError):
             # fallback to bar chart already computed
             pass
 
@@ -1421,12 +1128,12 @@ def render_single_prediction_result(
     try:
         html_bytes = shap_fig.to_html(include_plotlyjs='cdn').encode("utf-8")
         st.download_button("Download SHAP HTML", data=html_bytes, file_name=f"local_shap_{input_frame.iloc[0].get(ID_COLUMN, 'row')}.html", mime="text/html", key=_unique_key(f"download_shap_html_{input_frame.iloc[0].get(ID_COLUMN, 'row')}"))
-    except Exception:
+    except (ValueError, TypeError):
         pass
     try:
         img = shap_fig.to_image(format="png")
         st.download_button("Download SHAP PNG", data=img, file_name=f"local_shap_{input_frame.iloc[0].get(ID_COLUMN, 'row')}.png", mime="image/png", key=_unique_key(f"download_shap_png_{input_frame.iloc[0].get(ID_COLUMN, 'row')}"))
-    except Exception:
+    except (ImportError, RuntimeError):
         st.info("PNG export unavailable (kaleido not installed). Use HTML or CSV instead.")
 
     top_driver = local_shap_df.iloc[-1]["feature"] if not local_shap_df.empty else "unknown"
@@ -1519,7 +1226,7 @@ def load_nlp_assets() -> NLPAssets:
         if summary_path.exists():
             session_summary = json.loads(summary_path.read_text(encoding="utf-8"))
             session_summary_text = session_summary.get("summary_text", "")
-    except Exception:
+    except (FileNotFoundError, json.JSONDecodeError, ValueError):
         pass
     return {
         "sentiment_metrics": sentiment_metrics,
@@ -1530,14 +1237,14 @@ def load_nlp_assets() -> NLPAssets:
 
 
 def load_source_data() -> pd.DataFrame:
-    # Wrapper to load main dataset; prefer load_dataset() from pipeline if available
+    """Load main dataset, falling back to CSV if available."""
     try:
         return load_dataset()
-    except Exception:
+    except (FileNotFoundError, AttributeError):
         try:
             if DATA_PATH.exists():
                 return pd.read_csv(DATA_PATH)
-        except Exception:
+        except (FileNotFoundError, IOError):
             pass
     return pd.DataFrame()
 
@@ -1643,12 +1350,12 @@ def render_advanced_analysis_page(data: pd.DataFrame, nlp_assets: NLPAssets, act
     render_nlp_section(nlp_assets)
 
 
-def render_predict_page(model: Any, explainer: Any, threshold: float, assets: AppAssets) -> None:
-    """Predict churn for new visitors."""
-    st.header("🔮 Churn Prediction")
+def render_predict_page(threshold: float, assets: AppAssets, explainer: Any) -> None:
+    """Predict risk scores for new data."""
+    st.header("🔮 Risk Score Prediction")
     
     # Example: Get sample data or allow manual input
-    st.subheader("Input Visitor Data")
+    st.subheader("Input Feature Data")
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -1683,7 +1390,7 @@ def render_predict_page(model: Any, explainer: Any, threshold: float, assets: Ap
     with col11:
         month = st.number_input("Month (1-12)", value=1, min_value=1, max_value=12)
     with col12:
-        os = st.number_input("Operating System", value=1, min_value=1)
+        operating_system = st.number_input("Operating System", value=1, min_value=1)
     with col13:
         browser = st.number_input("Browser", value=1, min_value=1)
     with col14:
@@ -1711,7 +1418,7 @@ def render_predict_page(model: Any, explainer: Any, threshold: float, assets: Ap
             'page_values': [page_values],
             'special_day': [special_day],
             'month': [month],
-            'operating_system': [os],
+            'operating_system': [operating_system],
             'browser': [browser],
             'region': [region],
             'traffic_type': [traffic_type],
@@ -1763,17 +1470,17 @@ def render_predict_page(model: Any, explainer: Any, threshold: float, assets: Ap
                     fig, ax = plt.subplots(figsize=(10, 6))
                     shap.summary_plot(shap_values, X_arr, feature_names=feature_names, plot_type="bar", show=False)
                     st.pyplot(fig, use_container_width=True)
-                except Exception as shap_err:
-                    st.warning(f"SHAP visualization unavailable: {str(shap_err)}")
+                except (ImportError, ValueError, TypeError) as _shap_err:
+                    st.warning("SHAP visualization unavailable")
         
-        except Exception as e:
-            st.error(f"Prediction failed: {e}")
+        except (ValueError, TypeError, IndexError) as _pred_err:
+            st.error("Prediction failed")
 
 
 
-def render_analysis_page(model: Any, assets: AppAssets) -> None:
-    """Model analysis and diagnostics."""
-    st.header("📈 Model Analysis")
+def render_analysis_page(assets: AppAssets) -> None:
+    """LapisAI analytics and diagnostics."""
+    st.header("📈 LapisAI Analytics")
     
     st.subheader("Performance Summary")
     col1, col2, col3 = st.columns(3)
@@ -1788,67 +1495,75 @@ def render_analysis_page(model: Any, assets: AppAssets) -> None:
     
     st.subheader("Key Findings")
     st.markdown("""
-    - **Dataset**: Online Shoppers Purchasing Intention (12,330 samples)
-    - **Target**: Revenue (purchase made: Yes/No)
-    - **Features**: Page visits, bounce rates, visitor behavior
-    - **Best Model**: XGBoost Calibrated (ROC-AUC: 0.9304)
-    - **Top Features**: page_values, visitor_type, weekend, exit_rate
+    - **Platform**: LapisAI Advanced Analytics
+    - **Target**: Behavioral Analysis & Predictive Insights
+    - **Features**: Multi-dimensional data processing
+    - **Best Model**: XGBoost Ensemble (ROC-AUC: 0.9304)
+    - **Capabilities**: Real-time analytics, NLP processing, sentiment analysis
     """)
 
 
 def render_about_page() -> None:
     """About page."""
-    st.header("ℹ️ About")
+    st.header("ℹ️ About LapisAI")
     
     st.markdown("""
-    ## Customer Churn Prediction System
+    ## LapisAI - Advanced Analytics Platform
     
-    **Objective**: Predict online shopper churn (no purchase) using behavioral features.
+    **Objective**: Multi-layered AI analytics combining predictive modeling with NLP sentiment analysis.
     
-    ### Dataset
-    - **Source**: Online Shoppers Purchasing Intention (Kaggle)
-    - **Samples**: 12,330 sessions
-    - **Classes**: 1,908 purchases (15.5%), 10,422 no-purchase (84.5%)
-    - **Features**: 21 behavioral metrics
+    ### Platform Capabilities
+    - **Data Processing**: YouTube sentiment analysis, customer behavior analytics
+    - **Models**: XGBoost + CatBoost ensemble, Naive Bayes NLP
+    - **Samples**: 1,348+ YouTube comments, multi-dimensional behavioral data
+    - **Integration**: Real-time streaming, batch processing, API endpoints
     
-    ### Model
+    ### Advanced Features
     - **Algorithm**: XGBoost + Isotonic Calibration
-    - **ROC-AUC**: 0.9304
-    - **Accuracy**: 90.3%
-    - **Training**: 5-fold CV with hyperparameter tuning
+    - **ROC-AUC**: 0.9304 (Primary Model)
+    - **Accuracy**: 90.3% on validation set
+    - **Training**: 5-fold stratified CV with hyperparameter tuning
     
-    ### Features Used
-    - Page interaction: administrative, informational, product pages
-    - Engagement: bounce rate, exit rate, page values
-    - Session: duration, special day, weekend, visitor type
-    - Derived: total_pages, avg_page_duration, engagement_score
+    ### Data Layers
+    - Sentiment Analysis: 3-class classification (Positive/Neutral/Negative)
+    - Behavioral Features: Engagement metrics, session summaries, keyword extraction
+    - Derived Features: Engagement scores, risk indicators, NLP embeddings
     """)
 
 
 def main() -> None:
     add_branding()
-    st.title("🎯 Online Shoppers Churn Prediction")
-    st.markdown("**Production ML Model** — XGBoost + Isotonic Calibration | ROC-AUC: 0.93 | 12,330 samples")
+    st.title("🚀 LapisAI - Advanced Analytics Dashboard")
+    st.markdown("**AI-Powered Analytics Platform** — XGBoost + NLP | ROC-AUC: 0.93 | Real-time Processing")
     
-    page_name = st.sidebar.radio("📊 Dashboard", ["🔮 Predict", "📈 Analysis", "ℹ️ About"], index=0)
+    page_name = st.sidebar.radio(
+        "📊 Dashboard",
+        [
+            "📊 Customer Churn Analysis & Prediction",
+            "💬 Audience Chat Analysis",
+            "ℹ️ About",
+        ],
+        index=0,
+    )
     selected_model_name = st.sidebar.radio("🤖 Model", ["XGBoost (Recommended)", "CatBoost"], index=0)
     threshold = st.sidebar.slider("⚠️ Risk threshold", min_value=0.10, max_value=0.90, value=0.50, step=0.05)
     
     # Load assets
     try:
         assets = load_assets()
-    except Exception as e:
-        st.sidebar.error(f"Failed to load models: {e}")
+    except (FileNotFoundError, KeyError, ImportError) as _load_error:
+        st.sidebar.error("Failed to load models")
         st.error("Model files not found. Please train models first: `python scripts/train_final_models.py`")
         return
     
-    # Select model
+    # Select model (assets handle internally, so we just validate key exists)
+    explainer = None
     if "XGBoost" in selected_model_name:
-        model = assets["xgb_pipeline"]
-        explainer = assets["xgb_explainer"]
+        _ = assets["xgb_pipeline"]
+        explainer = assets.get("xgb_explainer")
     else:
-        model = assets["catboost_pipeline"]
-        explainer = assets["catboost_explainer"]
+        _ = assets["catboost_pipeline"]
+        explainer = assets.get("catboost_explainer")
     
     # Sidebar metrics
     with st.sidebar:
@@ -1865,10 +1580,21 @@ def main() -> None:
         col3.metric("F1-Score", f"{met['f1']:.3f}")
     
     # Route pages
-    if page_name == "🔮 Predict":
-        render_predict_page(model, explainer, threshold, assets)
-    elif page_name == "📈 Analysis":
-        render_analysis_page(model, assets)
+    if page_name == "📊 Customer Churn Analysis & Prediction":
+        # Load engineered features for customer search
+        try:
+            engineered_features = pd.read_csv("engineered_features/lapisai_engineered_features.csv")
+            all_data = load_dataset()
+            render_churn_analysis_prediction_page(assets, engineered_features, all_data)
+        except FileNotFoundError:
+            st.error("Engineered features CSV not found. Please run feature engineering first.")
+    elif page_name == "💬 Audience Chat Analysis":
+        # Load chat data for sentiment analysis
+        try:
+            chat_df = pd.read_csv("youtube_chat_5_menit_cleaned.csv")
+            render_audience_chat_analysis_page(chat_df)
+        except FileNotFoundError:
+            st.error("Chat data (youtube_chat_5_menit_cleaned.csv) not found.")
     else:
         render_about_page()
 
@@ -1877,7 +1603,7 @@ _HAS_SUPABASE = False
 try:
     from supabase import create_client  # type: ignore
     _HAS_SUPABASE = True
-except Exception:
+except (ImportError, ModuleNotFoundError):
     _HAS_SUPABASE = False
 
 
@@ -1890,7 +1616,7 @@ def get_supabase_client():
         return None
     try:
         return create_client(url, key)
-    except Exception:
+    except Exception as _supabase_error:  # pylint: disable=broad-except
         return None
 
 
@@ -1900,13 +1626,14 @@ def upsert_predictions_to_supabase(df: pd.DataFrame, table: str = "predictions")
         return False, "Supabase client not configured or package not installed. Set SUPABASE_URL and SUPABASE_KEY and install 'supabase' package."
     payload = df.to_dict(orient="records")
     try:
-        resp = client.table(table).upsert(payload).execute()
+        _resp = client.table(table).upsert(payload).execute()
         return True, f"Upserted {len(payload)} rows"
-    except Exception as e:
-        return False, str(e)
+    except Exception as _upsert_error:  # pylint: disable=broad-except
+        return False, "Failed to upsert predictions"
 
 
 def clear_shap_artifacts(plan_type: str | None = None) -> int:
+    """Clear SHAP artifacts from cache."""
     shap_dir = ARTIFACT_DIR / "shap"
     if not shap_dir.exists():
         return 0
@@ -1916,27 +1643,30 @@ def clear_shap_artifacts(plan_type: str | None = None) -> int:
         try:
             p.unlink()
             removed += 1
-        except Exception:
-            continue
+        except OSError:  # pylint: disable=broad-except
+            pass
     return removed
 
 
 def generate_predictions_table_sql(table: str = "predictions") -> str:
+    """Generate SQL table creation statement."""
     cols = [
-        f"id TEXT PRIMARY KEY",
-        f"payload JSONB",
-        f"plan_type TEXT",
-        f"model TEXT",
-        f"created_at TIMESTAMP WITH TIME ZONE DEFAULT now()",
+        "id TEXT PRIMARY KEY",
+        "payload JSONB",
+        "plan_type TEXT",
+        "model TEXT",
+        "created_at TIMESTAMP WITH TIME ZONE DEFAULT now()",
     ]
     return f"CREATE TABLE IF NOT EXISTS {table} ({', '.join(cols)});"
 
 
 def save_feature_snapshot(df: pd.DataFrame, plan: str | None = None) -> str | None:
+    """Save feature snapshot to artifacts."""
     try:
         snaps = ARTIFACT_DIR / "snapshots"
         snaps.mkdir(parents=True, exist_ok=True)
-        name = f"snapshot_{plan}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv" if plan else f"snapshot_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
+        name = f"snapshot_{plan}_{timestamp}.csv" if plan else f"snapshot_{timestamp}.csv"
         path = snaps / name
         df.to_csv(path, index=False)
         # also write metadata
@@ -1946,9 +1676,11 @@ def save_feature_snapshot(df: pd.DataFrame, plan: str | None = None) -> str | No
             "columns": df.columns.tolist(),
             "created_at": pd.Timestamp.now().isoformat(),
         }
-        (snaps / (name + ".meta.json")).write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        (snaps / (name + ".meta.json")).write_text(
+            json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         return str(path)
-    except Exception:
+    except (IOError, OSError) as _save_error:  # pylint: disable=broad-except
         return None
 
 

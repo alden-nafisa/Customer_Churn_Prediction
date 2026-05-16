@@ -1,0 +1,49 @@
+1. Days Since Last Login
+Definisi Bisnis: Fitur ini mengukur tingkat interaksi (engagement) pelanggan dengan platform. Semakin besar angkanya, semakin lama pelanggan tersebut "mati suri" atau tidak aktif. Pelanggan yang sudah lama tidak login memiliki indikasi kuat bahwa mereka tidak lagi menemukan nilai (value) dari produk, yang merupakan sinyal awal terjadinya churn.
+
+Rumus / Logika Kalkulasi: Dihitung dengan mencari selisih hari antara tanggal evaluasi data dengan tanggal terakhir kali pelanggan masuk ke sistem.
+
+Days_Since_Last_Login = Tanggal_Evaluasi_Data - MAX(Tanggal_Login)
+
+2. Payment Delay Days
+Definisi Bisnis: Fitur ini mengevaluasi seberapa disiplin pelanggan dalam memenuhi kewajiban finansial mereka. Keterlambatan pembayaran yang konsisten sering kali menjadi indikator bahwa perusahaan pelanggan sedang mengalami masalah keuangan (risiko gagal bayar) atau mereka sengaja menunda pembayaran karena tidak puas dengan layanan.
+
+Rumus / Logika Kalkulasi:
+Dihitung dengan mencari selisih hari antara tanggal jatuh tempo dengan tanggal pembayaran aktual, kemudian diambil nilai rata-ratanya untuk seluruh transaksi dalam satu tahun terakhir.
+
+Payment_Delay_Days = AVERAGE(Tanggal_Pembayaran_Aktual - Tanggal_Jatuh_Tempo)
+(Catatan: Jika dibayar sebelum jatuh tempo, nilainya dihitung 0 agar tidak merusak rata-rata keterlambatan).
+
+3. Avg NPS Score
+Definisi Bisnis: Net Promoter Score (NPS) adalah metrik standar industri untuk mengukur kepuasan dan loyalitas pelanggan. Skalanya dari 0 (sangat tidak merekomendasikan) hingga 10 (sangat merekomendasikan). Pelanggan dengan skor rata-rata di bawah 6 (Detractors) memiliki risiko tinggi untuk beralih ke kompetitor.
+
+Rumus / Logika Kalkulasi:
+Dihitung dengan menjumlahkan semua skor survei yang pernah diberikan oleh satu pelanggan, dibagi dengan total frekuensi pelanggan tersebut mengisi survei.
+
+Avg_NPS_Score = SUM(Skor_NPS_Pelanggan) / COUNT(Total_Survei_Pelanggan)
+
+4. Dunning Event Count
+Definisi Bisnis: Dunning adalah proses otomatis di mana sistem menagih ulang atau mengirimkan peringatan karena kegagalan penarikan dana (misalnya kartu kredit ditolak/kedaluwarsa, atau saldo tidak cukup). Jumlah dunning yang tinggi menunjukkan masalah gesekan pembayaran (payment friction) yang bisa menyebabkan involuntary churn (pelanggan berhenti bukan karena ingin, tapi karena sistem gagal menagih).
+
+Rumus / Logika Kalkulasi:
+Dihitung dengan menjumlahkan total baris transaksi di dalam database billing yang memiliki status gagal atau dunning untuk ID pelanggan tertentu.
+
+Dunning_Event_Count = COUNT(Transaksi_Penagihan WHERE Status_Transaksi = 'Failed' OR 'Dunning')
+
+5. Critical Ticket Ratio
+Definisi Bisnis: Fitur ini mengukur tingkat keparahan masalah teknis yang dialami pelanggan. Pelanggan yang mengajukan 10 tiket komplain berisi pertanyaan fitur mungkin masih aman. Namun, pelanggan yang mengajukan 3 tiket, tetapi semuanya adalah kategori "Kritis" (Server down, Data loss), memiliki probabilitas churn yang jauh lebih tinggi akibat rasa frustrasi.
+
+Rumus / Logika Kalkulasi:
+Dihitung dengan membagi jumlah tiket komplain berstatus prioritas tinggi dengan total keseluruhan tiket yang pernah diajukan oleh pelanggan tersebut.
+
+Critical_Ticket_Ratio = COUNT(Tiket WHERE Priority = 'High' OR 'Critical') / COUNT(Total_Semua_Tiket)
+
+6. Revenue at Risk / mo
+Definisi Bisnis: Ini adalah metrik prediktif tingkat lanjut yang menerjemahkan model Machine Learning ke dalam nominal mata uang. Fitur ini membantu tim manajemen (C-Level) untuk memprioritaskan pelanggan mana yang harus diselamatkan terlebih dahulu berdasarkan potensi kerugian finansial perusahaan jika pelanggan tersebut benar-benar churn.
+
+Rumus / Logika Kalkulasi:
+Ada dua pendekatan. Pendekatan prediktif murni mengalikan pendapatan bulanan rutin dengan skor probabilitas churn. Atau, menggunakan pendekatan komposit bobot (weighted factor) dari aspek kesehatan pelanggan.
+
+Pendekatan ML: Revenue_at_Risk = MRR (Monthly Recurring Revenue) × Churn_Probability_Score
+
+Pendekatan Rule-Based: Revenue_at_Risk = Base_MRR × (Bobot_Keterlambatan_Bayar + Bobot_NPS_Buruk + Bobot_Tiket_Kritis)

@@ -219,44 +219,25 @@ class CATBoostTrainer:
         return weights
     
     def hyperparameter_tuning(self, X_train: pd.DataFrame, y_train: pd.Series):
-        """Perform grid search for optimal hyperparameters"""
+        """Use fixed hyperparameters for CATBoost (avoid sklearn cloning issues)"""
         print(f"\n  Hyperparameter tuning for CATBoost ({self.plan_type})...")
         
         class_weights = self._calculate_class_weight(y_train)
         
-        param_grid = {
-            'depth': [4, 6, 8],
-            'learning_rate': [0.01, 0.05, 0.1],
-            'l2_leaf_reg': [1, 3, 5],
+        # Use fixed params to avoid sklearn cloning issues with class_weights parameter
+        self.best_params = {
+            'depth': 6,
+            'learning_rate': 0.05,
+            'l2_leaf_reg': 3,
+            'iterations': 200,
+            'class_weights': class_weights,
+            'random_state': RANDOM_STATE,
+            'verbose': False,
+            'cat_features': [],
         }
         
-        base_model = CatBoostClassifier(
-            iterations=100,
-            class_weights=class_weights,
-            random_state=RANDOM_STATE,
-            verbose=False,
-            cat_features=[]  # Handle later if needed
-        )
-        
-        grid_search = GridSearchCV(
-            base_model,
-            param_grid,
-            cv=3,
-            scoring='roc_auc',
-            n_jobs=-1,
-            verbose=0
-        )
-        
-        grid_search.fit(X_train, y_train)
-        
-        self.best_params = grid_search.best_params_
-        self.best_params['class_weights'] = class_weights
-        self.best_params['iterations'] = 200
-        self.best_params['random_state'] = RANDOM_STATE
-        self.best_params['verbose'] = False
-        
-        print(f"    Best params: {self.best_params}")
-        print(f"    Best CV Score (ROC-AUC): {grid_search.best_score_:.4f}")
+        print(f"    Using fixed hyperparameters (depth=6, lr=0.05, l2_leaf_reg=3)")
+        print(f"    Class weights: {class_weights}")
         
         return self.best_params
     

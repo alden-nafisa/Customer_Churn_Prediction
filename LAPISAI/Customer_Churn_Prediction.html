@@ -1,238 +1,691 @@
-"use client";
+import React, { useState, useEffect } from 'react';
+import {
+  BarChart3,
+  Users,
+  Settings,
+  LayoutDashboard,
+  Bell,
+  Search,
+  Menu,
+  ChevronDown,
+  Activity,
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  RefreshCcw,
+  Zap,
+  Database,
+  BrainCircuit,
+  TrendingUp,
+  Percent,
+  DollarSign
+} from 'lucide-react';
 
-import React, { useState } from "react";
+// Mock data untuk simulasi database pelanggan
+const mockCustomerDatabase = {
+  "0001": {
+    id: "C-0001",
+    status: "ACTIVE CUSTOMER",
+    company: "Kuvalisberg INC.",
+    planType: "Starter",
+    contractType: "Monthly",
+    threshold: 0.50,
+    lastLoginDays: 30,
+    supportTickets: 2,
+    tenureMonths: 20,
+    featureAdoption: 3,
+    monthlyRevenue: 4, // Simplified value for UI
+    paymentDelay: 1,
+    actualRevenue: 1250,
+    npsScore: 7
+  },
+  "0011": {
+    id: "C-0011",
+    status: "AT RISK",
+    company: "TechCorp Ltd.",
+    planType: "Enterprise",
+    contractType: "Annual",
+    threshold: 0.65,
+    lastLoginDays: 15,
+    supportTickets: 5,
+    tenureMonths: 36,
+    featureAdoption: 8,
+    monthlyRevenue: 9,
+    paymentDelay: 0,
+    actualRevenue: 4500,
+    npsScore: 6
+  },
+  "0111": {
+    id: "C-0111",
+    status: "CHURNED",
+    company: "GlobalNet Inc.",
+    planType: "Professional",
+    contractType: "Monthly",
+    threshold: 0.40,
+    lastLoginDays: 60,
+    supportTickets: 12,
+    tenureMonths: 12,
+    featureAdoption: 2,
+    monthlyRevenue: 3,
+    paymentDelay: 3,
+    actualRevenue: 800,
+    npsScore: 3
+  }
+};
 
-export default function CustomerChurnPrediction() {
-  // State untuk menyimpan nilai input
+export default function ChurnPredictionDashboard() {
+  // State Management
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  // Data Fetching States
+  const [customerIdInput, setCustomerIdInput] = useState('');
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [fetchedCustomer, setFetchedCustomer] = useState(null);
+  const [isFetching, setIsFetching] = useState(false);
+
+  // Prediction Input States
+  const [algorithm, setAlgorithm] = useState('XGBoost');
   const [formData, setFormData] = useState({
-    planType: "",
-    contractType: "",
-    threshold: "",
-    lastLoginDaysAgo: "",
-    supportTickets: "",
-    tenureMonths: "",
-    featureAdoptionPct: "",
-    monthlyRevenue: "",
-    paymentDelayCount: "",
-    algorithm: "XGBoost", // Default mengikuti warna biru pada desain Figma
+    planType: '',
+    contractType: '',
+    threshold: '',
+    lastLoginDays: '',
+    supportTickets: '',
+    tenureMonths: '',
+    featureAdoption: '',
+    monthlyRevenue: '',
+    paymentDelay: ''
   });
 
-  // State untuk mengatur proses UI: 'idle' | 'loading' | 'success'
-  const [predictionState, setPredictionState] = useState("idle");
+  // Prediction Result States
+  const [isPredicting, setIsPredicting] = useState(false);
+  const [predictionResult, setPredictionResult] = useState(null);
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
-  };
+  // Simulator State
+  const [simulatorValue, setSimulatorValue] = useState(7);
+  const [simulatedProbability, setSimulatedProbability] = useState(null);
 
-  const handleAlgorithmChange = (alg: string) => {
-    setFormData((prev) => ({ ...prev, algorithm: alg }));
+  const handleFetchData = () => {
+    if (!customerIdInput) return;
+
+    setIsFetching(true);
+    // Simulate API call
+    setTimeout(() => {
+      const data = mockCustomerDatabase[customerIdInput];
+      if (data) {
+        setFetchedCustomer(data);
+        // Auto-fill form
+        setFormData({
+          planType: data.planType,
+          contractType: data.contractType,
+          threshold: data.threshold.toString(),
+          lastLoginDays: data.lastLoginDays.toString(),
+          supportTickets: data.supportTickets.toString(),
+          tenureMonths: data.tenureMonths.toString(),
+          featureAdoption: data.featureAdoption.toString(),
+          monthlyRevenue: data.monthlyRevenue.toString(),
+          paymentDelay: data.paymentDelay.toString()
+        });
+      } else {
+        // Handle not found (simplified for this demo)
+        setFetchedCustomer(null);
+        alert("Customer ID not found in mock database. Try 0001.");
+      }
+      setIsFetching(false);
+      setIsDropdownOpen(false);
+      setPredictionResult(null); // Reset prediction if new data fetched
+    }, 800);
   };
 
   const handleRunPrediction = () => {
-    setPredictionState("loading");
-    // Simulasi proses machine learning (waktu tunggu 2 detik)
+    // Validate basic inputs are present (simplified)
+    if (!formData.planType || !formData.contractType || !formData.threshold) {
+      alert("Please ensure all inputs are filled or fetch data first.");
+      return;
+    }
+
+    setIsPredicting(true);
+
+    // Simulate ML model prediction delay
     setTimeout(() => {
-      setPredictionState("success");
-    }, 2000);
+      // Mock result generation based loosely on fetched data or static for demo
+      const result = {
+        probability: 82.5,
+        status: "HIGH - RISK",
+        confidence: 85,
+        revenueAtRisk: fetchedCustomer ? fetchedCustomer.actualRevenue : 1250,
+        drivers: [
+          { name: "dunning_event_count", value: 3, impact: 30, color: "bg-rose-400" },
+          { name: "days_since_last_login", value: formData.lastLoginDays || 45, impact: 15, color: "bg-indigo-400" },
+          { name: "critical_ticket_ratio", value: 0.8, impact: 8, color: "bg-rose-400" },
+          { name: "avg_nps_score", value: fetchedCustomer ? fetchedCustomer.npsScore : 7, impact: 8, color: "bg-emerald-400" }
+        ],
+        recommendation: {
+          action1: "Escalation to AM",
+          action2: "Offer 15% Discount"
+        }
+      };
+
+      setPredictionResult(result);
+      setSimulatorValue(fetchedCustomer ? fetchedCustomer.npsScore + 2 : 9); // Initial simulator setup
+      setSimulatedProbability(60.0); // Initial mock simulation result
+      setIsPredicting(false);
+    }, 1500);
   };
 
-  return (
-    <div className="flex w-full min-h-screen bg-slate-100 overflow-hidden font-['Lato']">
-      
-      {/* Sidebar Navigation */}
-      <div className="w-20 min-h-screen bg-white border-r border-gray-100 flex flex-col items-center py-6">
-        {/* Placeholder untuk ikon profil/menu di sidebar */}
-        <div className="w-[30px] h-[30px] bg-slate-200 rounded-md mb-8"></div>
+  const handleSimulatorChange = (e) => {
+    const val = parseInt(e.target.value);
+    setSimulatorValue(val);
+
+    // Very simple mock logic: higher NPS = lower probability
+    if (predictionResult) {
+      const baseProb = predictionResult.probability;
+      const reduction = (val - (fetchedCustomer ? fetchedCustomer.npsScore : 7)) * 10;
+      let newProb = baseProb - reduction;
+      if (newProb < 5) newProb = 5.2; // Floor
+      if (newProb > 99) newProb = 99.9; // Ceiling
+      setSimulatedProbability(parseFloat(newProb.toFixed(1)));
+    }
+  };
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  const Sidebar = () => (
+    <aside className={`bg-white border-r border-slate-200 h-screen overflow-y-auto transition-all duration-300 flex-shrink-0 ${sidebarOpen ? 'w-72' : 'w-20'} hidden md:block`}>
+      <div className="p-6 flex items-center gap-3">
+        <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold text-xl flex-shrink-0">
+          L
+        </div>
+        {sidebarOpen && <span className="text-2xl font-bold text-slate-800 tracking-tight">Lapis<span className="text-indigo-600">AI</span></span>}
       </div>
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col h-screen overflow-y-auto">
-        
-        {/* Top Bar */}
-        <div className="w-full h-20 flex items-center justify-between px-8 bg-slate-100">
-          <div className="flex items-center gap-4">
-            <button className="w-9 h-9 bg-[#F0F0F3] rounded-md flex items-center justify-center text-slate-500">
-              {/* Ikon Menu */}
-              <span>☰</span> 
-            </button>
-            <h1 className="text-zinc-900 text-xl font-bold">Customer Churn Prediction</h1>
+      {sidebarOpen && (
+        <div className="px-6 mb-8">
+          <p className="text-sm text-slate-500 font-medium">Welcome,</p>
+          <h2 className="text-xl font-bold text-slate-800">Admin</h2>
+        </div>
+      )}
+
+      <nav className="px-4 space-y-2">
+        <NavItem icon={<LayoutDashboard size={20} />} label="Dashboard" isOpen={sidebarOpen} />
+        <NavItem icon={<Users size={20} />} label="Customers" isOpen={sidebarOpen} active />
+        <NavItem icon={<BarChart3 size={20} />} label="Analytics" isOpen={sidebarOpen} />
+        <NavItem icon={<Settings size={20} />} label="Settings" isOpen={sidebarOpen} />
+      </nav>
+
+      {sidebarOpen && (
+        <div className="mt-10 px-4">
+          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 px-2">Log System & Machine Learning</h3>
+          <div className="space-y-3">
+            <LogCard icon={<BrainCircuit className="text-indigo-500" size={16} />} title="Model Retrained" desc="XGBoost model accuracy increased to 92.4%" time="15 min ago" />
+            <LogCard icon={<Database className="text-emerald-500" size={16} />} title="Data Sync" desc="500 new rows synced from Supabase." time="1 hrs ago" />
+            <LogCard icon={<Zap className="text-amber-500" size={16} />} title="Auto-Action" desc="Retention email sent to 5 high-risk clients." time="2 hrs ago" />
+            <LogCard icon={<AlertTriangle className="text-rose-500" size={16} />} title="Data Anomaly" desc="Unusual spike in Support Tickets detected." time="4 hrs ago" />
           </div>
-          <div className="flex items-center gap-4">
-            <button className="w-9 h-9 bg-[#F0F0F3] rounded-md flex items-center justify-center text-slate-500">
-              {/* Ikon Search */}
-              <span>🔍</span>
-            </button>
-            <button className="w-9 h-9 bg-[#F0F0F3] rounded-md flex items-center justify-center text-slate-500">
-              {/* Ikon Add */}
-              <span>+</span>
-            </button>
+
+          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mt-8 mb-4 px-2">High-Risk Alert</h3>
+          <div className="space-y-3 mb-6">
+            <AlertCard time="05:48AM" id="C-0992" type="Enterprise" desc="Probabilitas churn naik ke 85%. Segera tawarkan diskon." />
+            <AlertCard time="10:28AM" id="C-0112" type="Professional" desc="Mengirimkan 3 tiket komplain hari ini" />
           </div>
         </div>
+      )}
+    </aside>
+  );
 
-        {/* Prediction Input Section */}
-        <div className="px-8 pb-12">
-          <div className="bg-white rounded-[10px] outline outline-1 outline-gray-100 p-6 shadow-sm">
-            
-            <div className="flex justify-between items-center mb-8">
-              <h2 className="text-zinc-900 text-lg font-bold">Prediction Input</h2>
-              
-              {/* Algorithm Type Selection */}
-              <div className="flex items-center gap-4">
-                <span className="text-slate-500 text-sm">Algorithm Type</span>
-                <div className="flex gap-4">
-                  <button 
-                    onClick={() => handleAlgorithmChange("XGBoost")}
-                    className="flex items-center gap-2"
+  const NavItem = ({ icon, label, isOpen, active }) => (
+    <button className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${active ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50'}`}>
+      <span className={active ? 'text-indigo-600' : ''}>{icon}</span>
+      {isOpen && <span className="font-medium text-sm">{label}</span>}
+    </button>
+  );
+
+  const LogCard = ({ icon, title, desc, time }) => (
+    <div className="bg-slate-50 rounded-xl p-3 border border-slate-100 flex gap-3">
+      <div className="mt-0.5">{icon}</div>
+      <div>
+        <div className="flex justify-between items-start mb-1">
+          <h4 className="text-sm font-semibold text-slate-700">{title}</h4>
+          <span className="text-[10px] text-slate-400 font-medium">{time}</span>
+        </div>
+        <p className="text-xs text-slate-500 leading-relaxed">{desc}</p>
+      </div>
+    </div>
+  );
+
+  const AlertCard = ({ time, id, type, desc }) => (
+    <div className="bg-white rounded-xl p-3 border border-slate-200 shadow-sm relative overflow-hidden">
+      <div className="absolute left-0 top-0 bottom-0 w-1 bg-rose-500"></div>
+      <div className="flex justify-between items-center mb-1.5 pl-2">
+        <div className="flex items-center gap-1.5">
+          <div className="w-1.5 h-1.5 rounded-full bg-rose-500"></div>
+          <span className="text-[10px] font-bold text-rose-500">{time}</span>
+        </div>
+        <button className="text-slate-400 hover:text-slate-600">•••</button>
+      </div>
+      <div className="pl-2">
+        <h4 className="text-sm font-bold text-slate-800">{id} <span className="text-slate-500 font-medium">({type})</span></h4>
+        <p className="text-xs text-slate-500 mt-1 leading-relaxed">{desc}</p>
+      </div>
+    </div>
+  );
+
+  const InputField = ({ label, name, value, onChange, placeholder, type = "text" }) => (
+    <div className="flex flex-col">
+      <label className="text-xs text-slate-500 font-medium mb-1.5">{label}</label>
+      <div className="relative">
+        <input
+          type={type}
+          name={name}
+          value={value}
+          onChange={onChange}
+          placeholder={placeholder}
+          className="w-full text-sm font-medium text-slate-800 border-b border-slate-200 pb-2 focus:outline-none focus:border-indigo-500 transition-colors bg-transparent"
+        />
+        <div className="absolute right-0 top-0 text-slate-400">
+          <div className="flex flex-col items-center justify-center h-full">
+            <span className="text-[8px] cursor-pointer hover:text-slate-600">▲</span>
+            <span className="text-[8px] cursor-pointer hover:text-slate-600">▼</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="flex h-screen bg-slate-50 font-sans overflow-hidden">
+      <Sidebar />
+
+      <main className="flex-1 flex flex-col h-screen overflow-hidden">
+        {/* Header */}
+        <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between flex-shrink-0 z-10 shadow-sm">
+          <div className="flex items-center gap-4">
+            <button onClick={() => setSidebarOpen(!sidebarOpen)} className="text-slate-400 hover:text-slate-600 p-1 rounded-md hover:bg-slate-100 hidden md:block">
+              <Menu size={20} />
+            </button>
+            <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+              <Activity className="text-indigo-600" size={24} />
+              Customer Churn Prediction
+            </h1>
+          </div>
+          <div className="flex items-center gap-4">
+            <button className="text-slate-400 hover:text-slate-600"><Bell size={20} /></button>
+            <div className="w-8 h-8 rounded-full bg-slate-200 border-2 border-white shadow-sm overflow-hidden">
+              <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Admin" alt="User" className="w-full h-full object-cover" />
+            </div>
+          </div>
+        </header>
+
+        {/* Scrollable Content */}
+        <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6">
+
+          {/* SECTION 1: Auto-Fetch Data */}
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row overflow-hidden max-w-4xl mx-auto">
+
+            {/* Input Side */}
+            <div className="p-6 md:w-1/3 border-b md:border-b-0 md:border-r border-slate-200 bg-slate-50/50 relative">
+              <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
+                <Database size={16} className="text-indigo-500" />
+                AUTO-FETCH CUSTOMER DATA
+              </h3>
+
+              <div className="relative mb-4">
+                <div
+                  className="flex items-center justify-between border-b-2 border-slate-300 pb-2 cursor-pointer"
+                  onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                >
+                  <input
+                    type="text"
+                    value={customerIdInput}
+                    onChange={(e) => setCustomerIdInput(e.target.value)}
+                    placeholder="Input Customer ID.."
+                    className="w-full text-sm font-medium text-slate-700 focus:outline-none bg-transparent placeholder-slate-400"
+                    onClick={(e) => e.stopPropagation()} // Prevent closing when typing
+                  />
+                  <ChevronDown size={16} className={`text-slate-400 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} />
+                </div>
+
+                {/* Dropdown Options */}
+                {isDropdownOpen && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-xl z-20 max-h-48 overflow-y-auto">
+                    {Object.keys(mockCustomerDatabase).map(id => (
+                      <div
+                        key={id}
+                        className="px-4 py-2 text-sm text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 cursor-pointer transition-colors"
+                        onClick={() => {
+                          setCustomerIdInput(id);
+                          setIsDropdownOpen(false);
+                        }}
+                      >
+                        {id}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <button
+                onClick={handleFetchData}
+                disabled={isFetching || !customerIdInput}
+                className="w-full bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-bold py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow-md"
+              >
+                {isFetching ? <RefreshCcw size={16} className="animate-spin" /> : <Search size={16} />}
+                FETCH DATA
+              </button>
+            </div>
+
+            {/* Response Side */}
+            <div className="p-6 md:w-2/3 flex flex-col justify-center bg-white relative">
+              <span className="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Fetch Response:</span>
+
+              {isFetching ? (
+                <div className="animate-pulse flex space-x-4">
+                  <div className="flex-1 space-y-4 py-1">
+                    <div className="h-6 bg-slate-200 rounded w-3/4"></div>
+                    <div className="h-4 bg-slate-200 rounded w-1/2"></div>
+                  </div>
+                </div>
+              ) : fetchedCustomer ? (
+                <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
+                  <div className="flex items-center gap-3 mb-2">
+                    <h2 className="text-3xl font-black text-slate-800 tracking-tight">{fetchedCustomer.id}</h2>
+                    <span className="bg-emerald-100 text-emerald-700 text-xs font-bold px-2.5 py-1 rounded-md border border-emerald-200 uppercase tracking-wider">
+                      DETECTED
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 text-lg">
+                    <span className="text-slate-400">|</span>
+                    <span className="font-bold text-emerald-600">{fetchedCustomer.status}</span>
+                  </div>
+                  <div className="mt-3 flex items-center gap-2 text-sm text-slate-500 bg-slate-50 p-2 rounded-md border border-slate-100 w-fit">
+                     <span className="font-medium text-slate-700">{fetchedCustomer.company}</span>
+                     <span>|</span>
+                     <span>Predicting future risk</span>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <h2 className="text-3xl font-black text-slate-300 tracking-tight">C-0000 <span className="text-slate-200">|</span> -</h2>
+                  <p className="text-slate-400 mt-2 font-medium">| - | - |</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* SECTION 2: Prediction Input */}
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 md:p-8 relative">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4 border-b border-slate-100 pb-4">
+              <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                <Settings size={20} className="text-slate-400" />
+                PREDICTION INPUT
+              </h2>
+
+              <div className="flex items-center gap-4 text-sm font-medium">
+                <span className="text-slate-500">Algorithm Type</span>
+                <label className="flex items-center gap-2 cursor-pointer group">
+                  <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${algorithm === 'XGBoost' ? 'border-indigo-500' : 'border-slate-300 group-hover:border-slate-400'}`}>
+                    {algorithm === 'XGBoost' && <div className="w-2 h-2 bg-indigo-500 rounded-full"></div>}
+                  </div>
+                  <input type="radio" name="algorithm" value="XGBoost" checked={algorithm === 'XGBoost'} onChange={() => setAlgorithm('XGBoost')} className="hidden" />
+                  <span className={algorithm === 'XGBoost' ? 'text-slate-800 font-bold' : 'text-slate-500'}>XGBoost</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer group">
+                  <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${algorithm === 'CatBoost' ? 'border-indigo-500' : 'border-slate-300 group-hover:border-slate-400'}`}>
+                    {algorithm === 'CatBoost' && <div className="w-2 h-2 bg-indigo-500 rounded-full"></div>}
+                  </div>
+                  <input type="radio" name="algorithm" value="CatBoost" checked={algorithm === 'CatBoost'} onChange={() => setAlgorithm('CatBoost')} className="hidden" />
+                  <span className={algorithm === 'CatBoost' ? 'text-slate-800 font-bold' : 'text-slate-500'}>CatBoost</span>
+                </label>
+              </div>
+            </div>
+
+            {/* Form Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-x-8 gap-y-6 mb-8">
+              {/* Selectors spanning wider */}
+              <div className="md:col-span-1 lg:col-span-2">
+                <label className="text-xs text-slate-500 font-medium mb-1.5 block">Plan Type</label>
+                <div className="relative">
+                  <select
+                    name="planType"
+                    value={formData.planType}
+                    onChange={handleInputChange}
+                    className="w-full text-sm font-bold text-slate-800 border-b border-slate-200 pb-2 focus:outline-none focus:border-indigo-500 appearance-none bg-transparent cursor-pointer"
                   >
-                    <div className={`w-5 h-5 rounded-full flex items-center justify-center ${formData.algorithm === "XGBoost" ? "bg-[#5E81F4]" : "bg-[#F0F0F3]"}`}>
-                      {formData.algorithm === "XGBoost" && <div className="w-2 h-2 bg-white rounded-full"></div>}
-                    </div>
-                    <span className={`text-sm font-bold ${formData.algorithm === "XGBoost" ? "text-zinc-900" : "text-slate-500"}`}>XGBoost</span>
-                  </button>
-                  <button 
-                    onClick={() => handleAlgorithmChange("CatBoost")}
-                    className="flex items-center gap-2"
-                  >
-                    <div className={`w-5 h-5 rounded-full flex items-center justify-center ${formData.algorithm === "CatBoost" ? "bg-[#5E81F4]" : "bg-[#F0F0F3]"}`}>
-                      {formData.algorithm === "CatBoost" && <div className="w-2 h-2 bg-white rounded-full"></div>}
-                    </div>
-                    <span className={`text-sm font-bold ${formData.algorithm === "CatBoost" ? "text-zinc-900" : "text-slate-500"}`}>CatBoost</span>
-                  </button>
+                    <option value="" disabled>Choose The Plan</option>
+                    <option value="Starter">Starter</option>
+                    <option value="Professional">Professional</option>
+                    <option value="Enterprise">Enterprise</option>
+                  </select>
+                  <ChevronDown size={14} className="absolute right-0 top-1 text-slate-400 pointer-events-none" />
                 </div>
               </div>
+              <div className="md:col-span-1 lg:col-span-2">
+                <label className="text-xs text-slate-500 font-medium mb-1.5 block">Contract Type</label>
+                <div className="relative">
+                  <select
+                    name="contractType"
+                    value={formData.contractType}
+                    onChange={handleInputChange}
+                    className="w-full text-sm font-bold text-slate-800 border-b border-slate-200 pb-2 focus:outline-none focus:border-indigo-500 appearance-none bg-transparent cursor-pointer"
+                  >
+                    <option value="" disabled>Choose The Contract</option>
+                    <option value="Monthly">Monthly</option>
+                    <option value="Annual">Annual</option>
+                  </select>
+                  <ChevronDown size={14} className="absolute right-0 top-1 text-slate-400 pointer-events-none" />
+                </div>
+              </div>
+
+              {/* Number Inputs */}
+              <InputField label="Threshold" name="threshold" value={formData.threshold} onChange={handleInputChange} placeholder="Start typing..." />
+              <InputField label="Last Login Days Ago" name="lastLoginDays" value={formData.lastLoginDays} onChange={handleInputChange} placeholder="Start typing..." type="number" />
+              <InputField label="Support Tickets Last 90d" name="supportTickets" value={formData.supportTickets} onChange={handleInputChange} placeholder="Start typing..." type="number" />
+              <InputField label="Tenure Months" name="tenureMonths" value={formData.tenureMonths} onChange={handleInputChange} placeholder="Start typing..." type="number" />
+
+              <div className="lg:col-span-1 hidden lg:block"></div> {/* Spacer for alignment as in design */}
+
+              <InputField label="Feature Adoption PCT" name="featureAdoption" value={formData.featureAdoption} onChange={handleInputChange} placeholder="Start typing..." type="number" />
+              <InputField label="Monthly Revenue" name="monthlyRevenue" value={formData.monthlyRevenue} onChange={handleInputChange} placeholder="Start typing..." type="number" />
+              <InputField label="Payment Delay Count" name="paymentDelay" value={formData.paymentDelay} onChange={handleInputChange} placeholder="Start typing..." type="number" />
             </div>
 
-            {/* Input Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-x-8 gap-y-6 mb-8">
-              
-              {/* Plan Type */}
-              <div className="flex flex-col gap-1 border-b border-slate-200 pb-2">
-                <label className="text-slate-500 text-sm">Plan Type</label>
-                <select name="planType" value={formData.planType} onChange={handleInputChange} className="text-zinc-900 text-sm font-bold bg-transparent outline-none cursor-pointer">
-                  <option value="" disabled>Choose The Plan</option>
-                  <option value="basic">Basic</option>
-                  <option value="premium">Premium</option>
-                </select>
-              </div>
-
-              {/* Contract Type */}
-              <div className="flex flex-col gap-1 border-b border-slate-200 pb-2">
-                <label className="text-slate-500 text-sm">Contract Type</label>
-                <select name="contractType" value={formData.contractType} onChange={handleInputChange} className="text-zinc-900 text-sm font-bold bg-transparent outline-none cursor-pointer">
-                  <option value="" disabled>Choose The Contract</option>
-                  <option value="month-to-month">Month-to-Month</option>
-                  <option value="annual">Annual</option>
-                </select>
-              </div>
-              
-              <div className="hidden md:block col-span-2"></div> {/* Spacer */}
-
-              {/* Threshold */}
-              <div className="flex flex-col gap-1 border-b border-slate-200 pb-2">
-                <label className="text-slate-500 text-sm">Threshold</label>
-                <input type="text" name="threshold" value={formData.threshold} onChange={handleInputChange} placeholder="Start typing…" className="text-slate-500 text-sm font-bold outline-none bg-transparent placeholder-slate-400" />
-              </div>
-
-              {/* Last Login Days Ago */}
-              <div className="flex flex-col gap-1 border-b border-slate-200 pb-2">
-                <label className="text-slate-500 text-sm font-bold">Last Login Days Ago</label>
-                <input type="number" name="lastLoginDaysAgo" value={formData.lastLoginDaysAgo} onChange={handleInputChange} placeholder="Start typing…" className="text-slate-500 text-sm font-bold outline-none bg-transparent placeholder-slate-400" />
-              </div>
-
-              {/* Support Tickets Last 90d */}
-              <div className="flex flex-col gap-1 border-b border-slate-200 pb-2">
-                <label className="text-slate-500 text-sm">Support Tickets Last 90d</label>
-                <input type="number" name="supportTickets" value={formData.supportTickets} onChange={handleInputChange} placeholder="Start typing…" className="text-slate-500 text-sm font-bold outline-none bg-transparent placeholder-slate-400" />
-              </div>
-
-              {/* Tenure Months */}
-              <div className="flex flex-col gap-1 border-b border-slate-200 pb-2">
-                <label className="text-slate-500 text-sm">Tenure Months</label>
-                <input type="number" name="tenureMonths" value={formData.tenureMonths} onChange={handleInputChange} placeholder="Start typing…" className="text-slate-500 text-sm font-bold outline-none bg-transparent placeholder-slate-400" />
-              </div>
-
-              {/* Feature Adoption PCT */}
-              <div className="flex flex-col gap-1 border-b border-slate-200 pb-2">
-                <label className="text-slate-500 text-sm">Feature Adoption PCT</label>
-                <input type="text" name="featureAdoptionPct" value={formData.featureAdoptionPct} onChange={handleInputChange} placeholder="Start typing…" className="text-slate-500 text-sm font-bold outline-none bg-transparent placeholder-slate-400" />
-              </div>
-
-              {/* Monthly Revenue */}
-              <div className="flex flex-col gap-1 border-b border-slate-200 pb-2">
-                <label className="text-slate-500 text-sm">Monthly Revenue</label>
-                <input type="number" name="monthlyRevenue" value={formData.monthlyRevenue} onChange={handleInputChange} placeholder="Start typing…" className="text-slate-500 text-sm font-bold outline-none bg-transparent placeholder-slate-400" />
-              </div>
-
-              {/* Payment Delay Count */}
-              <div className="flex flex-col gap-1 border-b border-slate-200 pb-2">
-                <label className="text-slate-500 text-sm">Payment Delay Count</label>
-                <input type="number" name="paymentDelayCount" value={formData.paymentDelayCount} onChange={handleInputChange} placeholder="Start typing…" className="text-slate-500 text-sm font-bold outline-none bg-transparent placeholder-slate-400" />
-              </div>
-            </div>
-
-            {/* Run Prediction Button */}
-            <div className="flex justify-center mt-6">
-              <button 
+            <div className="flex justify-center mt-8">
+              <button
                 onClick={handleRunPrediction}
-                disabled={predictionState === "loading"}
-                className={`w-96 h-14 rounded-lg flex items-center justify-center text-white text-xl font-black tracking-wide transition-all ${predictionState === "loading" ? "bg-indigo-400 cursor-not-allowed" : "bg-indigo-500 hover:bg-indigo-600"}`}
+                disabled={isPredicting}
+                className={`
+                  w-full max-w-md text-white font-bold py-3.5 px-8 rounded-xl transition-all duration-300 shadow-md flex items-center justify-center gap-2
+                  ${isPredicting ? 'bg-indigo-400 cursor-not-allowed' : 'bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 hover:shadow-lg hover:-translate-y-0.5'}
+                `}
               >
-                {predictionState === "loading" ? "PROCESSING..." : "RUN PREDICTION"}
+                {isPredicting ? (
+                  <>
+                    <RefreshCcw size={20} className="animate-spin" />
+                    PROCESSING MODEL...
+                  </>
+                ) : (
+                  <>
+                    <Zap size={20} className={predictionResult ? "text-amber-300" : "text-indigo-200"} />
+                    {predictionResult ? "RE-RUN PREDICTION" : "RUN PREDICTION"}
+                  </>
+                )}
               </button>
             </div>
           </div>
 
-          {/* Prediction Response Section */}
-          <div className="mt-12">
-            <h2 className="text-zinc-900 text-2xl font-bold mb-6">Prediction Response</h2>
-            
-            {/* Box Response (Rectangle 10 dari Figma) */}
-            <div className="w-full h-96 bg-zinc-400/20 rounded-lg flex flex-col items-center justify-center p-8">
-              
-              {predictionState === "idle" && (
-                <p className="text-slate-500 text-lg">Input the customer data above and run the model to view prediction results.</p>
-              )}
-              
-              {predictionState === "loading" && (
-                <div className="flex flex-col items-center animate-pulse">
-                  <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-                  <p className="text-slate-600 font-bold">Evaluating Customer Data with {formData.algorithm}...</p>
-                </div>
-              )}
+          {}
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 md:p-8">
+            <h2 className="text-lg font-bold text-slate-800 text-center mb-8 flex items-center justify-center gap-2">
+              <TrendingUp size={20} className="text-slate-400" />
+              PREDICTION RESPONSE
+            </h2>
 
-              {predictionState === "success" && (
-                <div className="w-full h-full flex flex-col gap-4">
-                  <div className="bg-white p-6 rounded-md shadow-sm border border-gray-100">
-                    <h3 className="text-xl font-bold text-zinc-900 mb-2">Churn Probability: <span className="text-red-500">82%</span></h3>
-                    <p className="text-slate-600">The model indicates a high risk of churn for this customer.</p>
+            {!predictionResult && !isPredicting ? (
+               // Empty State
+               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 h-64">
+                 <div className="bg-slate-100/50 rounded-xl border border-slate-200 border-dashed flex items-center justify-center">
+                    <span className="text-slate-400 font-medium text-sm">Awaiting Analysis...</span>
+                 </div>
+                 <div className="bg-slate-100/50 rounded-xl border border-slate-200 border-dashed flex items-center justify-center">
+                    <span className="text-slate-400 font-medium text-sm">Awaiting Factors...</span>
+                 </div>
+                 <div className="bg-slate-100/50 rounded-xl border border-slate-200 border-dashed flex items-center justify-center">
+                    <span className="text-slate-400 font-medium text-sm">Awaiting Recommendation...</span>
+                 </div>
+               </div>
+            ) : isPredicting ? (
+               // Loading State
+               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 h-64">
+                 {[1, 2, 3].map(i => (
+                    <div key={i} className="bg-slate-50 rounded-xl border border-slate-100 p-6 flex flex-col justify-center items-center animate-pulse">
+                      <div className="w-16 h-16 rounded-full border-4 border-indigo-100 border-t-indigo-500 animate-spin mb-4"></div>
+                      <div className="h-4 bg-slate-200 rounded w-1/2 mb-2"></div>
+                      <div className="h-3 bg-slate-200 rounded w-1/3"></div>
+                    </div>
+                 ))}
+               </div>
+            ) : (
+              // Results State
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
+
+                {/* Result Column 1: Analysis */}
+                <div className="bg-slate-50 rounded-2xl p-6 border border-slate-200 shadow-inner flex flex-col items-center justify-center relative overflow-hidden">
+                  <div className="absolute top-0 right-0 p-3 opacity-10"><BarChart3 size={100} /></div>
+
+                  <h3 className="text-sm font-bold text-slate-500 tracking-wider mb-6">ANALYSIS RESULT</h3>
+
+                  <div className="text-center mb-6 z-10">
+                    <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wide">Churn Probability</p>
+                    <div className="bg-rose-500 text-white font-black text-3xl py-2 px-6 rounded-lg shadow-sm shadow-rose-200 inline-flex items-center gap-1">
+                      {predictionResult.probability}% <Percent size={20} className="opacity-70" />
+                    </div>
                   </div>
-                  
-                  {/* Tempat yang sangat cocok untuk menaruh visualisasi Explainable AI (SHAP Values) */}
-                  <div className="flex-1 bg-white p-6 rounded-md shadow-sm border border-gray-100">
-                    <h4 className="font-bold text-slate-700 mb-4">Key Impact Factors (SHAP Values)</h4>
-                    <div className="flex flex-col gap-3">
-                      <div className="w-full bg-slate-100 h-8 rounded-md flex items-center px-4 relative overflow-hidden">
-                        <div className="absolute left-0 top-0 h-full bg-red-400/50 w-[80%]"></div>
-                        <span className="relative z-10 text-sm font-bold text-zinc-800">Support Tickets Last 90d (+1.2)</span>
-                      </div>
-                      <div className="w-full bg-slate-100 h-8 rounded-md flex items-center px-4 relative overflow-hidden">
-                        <div className="absolute left-0 top-0 h-full bg-red-400/50 w-[65%]"></div>
-                        <span className="relative z-10 text-sm font-bold text-zinc-800">Last Login Days Ago (+0.8)</span>
-                      </div>
-                      <div className="w-full bg-slate-100 h-8 rounded-md flex items-center px-4 relative overflow-hidden">
-                        <div className="absolute left-0 top-0 h-full bg-blue-400/50 w-[30%]"></div>
-                        <span className="relative z-10 text-sm font-bold text-zinc-800">Feature Adoption PCT (-0.4)</span>
-                      </div>
+
+                  <div className="flex items-center gap-3 mb-8 z-10 bg-white px-4 py-2 rounded-full shadow-sm border border-slate-100">
+                    <span className="text-sm font-bold text-slate-600">STATUS :</span>
+                    <span className="bg-rose-100 text-rose-600 text-sm font-black px-3 py-1 rounded-md border border-rose-200 flex items-center gap-1">
+                      <AlertTriangle size={14} /> {predictionResult.status}
+                    </span>
+                  </div>
+
+                  <div className="w-full space-y-4 z-10 text-left bg-white p-4 rounded-xl border border-slate-100">
+                    <div>
+                      <p className="text-xs font-bold text-slate-500 mb-1">MODEL CONFIDENCE :</p>
+                      <p className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                        {predictionResult.confidence}% <span className="text-slate-400 font-medium">({algorithm} Model)</span>
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-500 mb-1">REVENUE AT RISK :</p>
+                      <p className="text-sm font-bold text-slate-800 flex items-center gap-1">
+                        <DollarSign size={14} className="text-slate-400" />
+                        {predictionResult.revenueAtRisk.toLocaleString()} / month
+                      </p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">(Hover Tooltip: MRR x Health Score)</p>
                     </div>
                   </div>
                 </div>
-              )}
 
-            </div>
+                {/* Result Column 2: Factors */}
+                <div className="bg-slate-50 rounded-2xl p-6 border border-slate-200 shadow-inner">
+                  <h3 className="text-sm font-bold text-slate-500 tracking-wider mb-6 text-center">RESULT FACTOR</h3>
+
+                  <p className="text-xs font-bold text-slate-800 mb-4 border-b border-slate-200 pb-2">TOP CHURN DRIVERS :</p>
+
+                  <div className="space-y-5">
+                    {predictionResult.drivers.map((driver, idx) => (
+                      <div key={idx} className="relative group">
+                        <div className="flex justify-between items-end mb-1">
+                          <div className="flex items-center gap-2">
+                            <span className={`w-3 h-3 rounded-full ${driver.color} shadow-sm`}></span>
+                            <span className="text-xs font-bold text-slate-700 font-mono bg-white px-2 py-0.5 rounded border border-slate-100">{driver.name}</span>
+                          </div>
+                          <span className="text-xs font-bold text-slate-500">({driver.value})</span>
+                        </div>
+                        <div className="w-full bg-slate-200 rounded-full h-3.5 mb-1 overflow-hidden flex shadow-inner">
+                          <div
+                            className={`${driver.color} h-3.5 rounded-full transition-all duration-1000 ease-out flex items-center justify-end pr-1`}
+                            style={{ width: `${driver.impact}%` }}
+                          >
+                            <span className="text-[8px] font-bold text-white opacity-80">+{driver.impact}%</span>
+                          </div>
+                        </div>
+                        {/* Tooltip on hover */}
+                        <div className="absolute left-0 -top-8 bg-slate-800 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 whitespace-nowrap">
+                          Contributes {driver.impact}% to churn risk
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Result Column 3: Simulator */}
+                <div className="bg-slate-50 rounded-2xl p-6 border border-slate-200 shadow-inner flex flex-col">
+                  <h3 className="text-sm font-bold text-slate-500 tracking-wider mb-6 text-center">ACTION PLAN & SIMULATOR</h3>
+
+                  <div className="bg-white p-4 rounded-xl border border-indigo-100 shadow-sm mb-6 relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500"></div>
+                    <p className="text-xs font-bold text-indigo-800 mb-3 flex items-center gap-1.5">
+                      <Zap size={14} className="text-indigo-500" fill="currentColor" />
+                      AI RECOMMENDATION :
+                    </p>
+                    <ul className="space-y-2">
+                      <li className="text-sm font-semibold text-slate-700 flex items-start gap-2">
+                        <CheckCircle2 size={16} className="text-emerald-500 mt-0.5 flex-shrink-0" />
+                        {predictionResult.recommendation.action1}
+                      </li>
+                      <li className="text-sm font-semibold text-slate-700 flex items-start gap-2">
+                        <CheckCircle2 size={16} className="text-emerald-500 mt-0.5 flex-shrink-0" />
+                        {predictionResult.recommendation.action2}
+                      </li>
+                    </ul>
+                  </div>
+
+                  <div className="flex-1 border-t border-slate-200 pt-5">
+                    <p className="text-xs font-bold text-slate-800 mb-4 flex items-center gap-2">
+                      <Settings size={14} className="text-slate-500" />
+                      What-If Simulator
+                    </p>
+
+                    <div className="mb-6 bg-white p-3 rounded-lg border border-slate-200">
+                      <label className="text-xs font-medium text-slate-600 block mb-2">
+                        What if we increase <span className="font-mono bg-slate-100 px-1 rounded text-slate-800">avg_nps_score</span> to <span className="font-bold text-indigo-600 text-sm">{simulatorValue}</span>?
+                      </label>
+                      <input
+                        type="range"
+                        min="1"
+                        max="10"
+                        value={simulatorValue}
+                        onChange={handleSimulatorChange}
+                        className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                      />
+                      <div className="flex justify-between text-[10px] text-slate-400 mt-1 font-mono">
+                        <span>1</span>
+                        <span>5</span>
+                        <span>10</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between bg-white p-3 rounded-xl border border-amber-200 shadow-sm">
+                      <span className="text-xs font-bold text-slate-600">New Est. Probability :</span>
+                      <span className="bg-amber-400 text-amber-900 font-black text-sm px-3 py-1 rounded-md shadow-inner flex items-center gap-1 transition-all">
+                        {simulatedProbability}%
+                        {simulatedProbability < predictionResult.probability ? <TrendingUp size={12} className="rotate-180" /> : null}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            )}
           </div>
+
         </div>
-      </div>
+      </main>
     </div>
   );
 }

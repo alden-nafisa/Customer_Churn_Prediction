@@ -57,6 +57,9 @@ DROP_FEATURES = [
     'unsubscribed_date',
     'last_login_date_max',
     'churned',  # target variable
+    'plan_type',  # categorical - should be handled separately or before training
+    'contract_type',  # categorical - should be handled separately or before training
+    'usage_segment',  # categorical - should be handled separately or before training
 ]
 
 
@@ -403,7 +406,7 @@ def main():
         
         X_train, X_test, y_train, y_test, features = prepare_data_for_modeling(plan_type)
         
-        # Save datasets
+        # Save datasets - only include selected numeric features + target
         train_data = pd.concat([X_train, y_train.reset_index(drop=True)], axis=1)
         test_data = pd.concat([X_test, y_test.reset_index(drop=True)], axis=1)
         
