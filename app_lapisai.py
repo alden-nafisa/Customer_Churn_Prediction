@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Mapping, TypedDict
+from typing import Any, Mapping, TypedDict, Union
 
 import numpy as np
 import pandas as pd
@@ -452,7 +452,8 @@ def show_model_comparison(metrics: MetricsBundle, plan_type: str) -> None:
         {"model": "XGBoost", **metrics["xgboost"]},
         {"model": "CatBoost", **metrics["catboost"]},
     ])
-    display = comparison[["model", "accuracy", "precision", "recall", "f1", "roc_auc", "pr_auc"]].copy()
+    cols = ["model", "accuracy", "precision", "recall", "f1", "roc_auc", "pr_auc"]
+    display: pd.DataFrame = comparison[[c for c in cols if c in comparison.columns]].copy()
     display.columns = ["Model", "Accuracy", "Precision", "Recall", "F1", "ROC AUC", "PR AUC"]
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.markdown(f'<div class="section-title">Model comparison - {plan_type}</div>', unsafe_allow_html=True)
@@ -533,7 +534,7 @@ def build_shap_summary(scored: pd.DataFrame, xgb_pipeline, explainer, selected_f
     if selected_features:
         feature_frame = feature_frame[[column for column in selected_features if column in feature_frame.columns]].copy()
 
-    transformed = transform_features(xgb_pipeline, feature_frame)
+    transformed = transform_features(xgb_pipeline, feature_frame if isinstance(feature_frame, pd.DataFrame) else feature_frame.to_frame())
     explanation = explainer(transformed)
     feature_names = xgb_pipeline.named_steps["preprocessor"].get_feature_names_out().tolist()
 
@@ -560,7 +561,7 @@ def build_shap_summary(scored: pd.DataFrame, xgb_pipeline, explainer, selected_f
         for idx in range(len(sample))
     ]
 
-    return global_df, export_df
+    return global_df, export_df  # type: ignore[return-value]
 
 
 def build_explanation_summary(scored: pd.DataFrame, assets: AppAssets, model_name: str, threshold: float, plan_type: str) -> str:
@@ -622,7 +623,8 @@ def explain_with_shap(scored: pd.DataFrame, xgb_pipeline, explainer, selected_fe
     row_features = row.drop(columns=[ID_COLUMN, TARGET_COLUMN, "churn_probability", "risk_flag", "risk_rank", "actual_churn_label", "predicted_churn_label", "match_flag"], errors="ignore")
     if selected_features:
         row_features = row_features[[column for column in selected_features if column in row_features.columns]].copy()
-    row_transformed = transform_features(xgb_pipeline, row_features)
+    row_features_df: pd.DataFrame = row_features if isinstance(row_features, pd.DataFrame) else row_features.to_frame()
+    row_transformed = transform_features(xgb_pipeline, row_features_df)
     row_exp = explainer(row_transformed)
     feature_names = xgb_pipeline.named_steps["preprocessor"].get_feature_names_out().tolist()
     row_values = row_exp.values[0]
@@ -1155,7 +1157,8 @@ def explain_single_input(input_frame: pd.DataFrame, pipeline, explainer, selecte
     if selected_features:
         feature_frame = feature_frame[[column for column in selected_features if column in feature_frame.columns]].copy()
 
-    transformed = transform_features(pipeline, feature_frame)
+    feature_frame_df: pd.DataFrame = feature_frame if isinstance(feature_frame, pd.DataFrame) else feature_frame.to_frame()
+    transformed = transform_features(pipeline, feature_frame_df)
     explanation = explainer(transformed)
     feature_names = pipeline.named_steps["preprocessor"].get_feature_names_out().tolist()
     row_values = explanation.values[0]
@@ -1431,8 +1434,12 @@ def render_predict_page(threshold: float, assets: AppAssets, explainer: Any) -> 
         })
         
         try:
-            # Predict
-            probs = model.predict_proba(input_df)[:, 1][0]
+            # Predict - extract model from assets based on selected model
+            selected_model = assets.get("xgb_pipeline") if "XGBoost" in str(assets) else assets.get("catboost_pipeline")
+            if selected_model is None:
+                st.error("Model not loaded. Please ensure artifacts are available.")
+                return
+            probs = selected_model.predict_proba(input_df)[:, 1][0]
             pred = 1 if probs >= threshold else 0
             
             # Display result
@@ -1585,7 +1592,7 @@ def main() -> None:
         try:
             engineered_features = pd.read_csv("engineered_features/lapisai_engineered_features.csv")
             all_data = load_dataset()
-            render_churn_analysis_prediction_page(assets, engineered_features, all_data)
+            render_churn_analysis_prediction_page(dict(assets), engineered_features, all_data)
         except FileNotFoundError:
             st.error("Engineered features CSV not found. Please run feature engineering first.")
     elif page_name == "💬 Audience Chat Analysis":

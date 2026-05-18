@@ -1,8 +1,0 @@
-{
-  "plan_type": "Starter",
-  "features_selected": "['days_since_last_login', 'avg_monthly_usage_hours', 'payment_delay_days_mean', 'critical_ticket_ratio', 'avg_nps_score', 'revenue_at_risk', 'payment_consistency_score', 'unresolved_ratio', 'total_tickets', 'mrr_current', 'tenure_days', 'usage_per_user', 'feature_adoption_pct_mean', 'total_users']",
-  "feature_groups": "{'tier_1': ['days_since_last_login', 'avg_monthly_usage_hours', 'payment_delay_days_mean', 'dunning_event_count', 'critical_ticket_ratio', 'avg_nps_score'], 'tier_2': ['revenue_at_risk', 'payment_consistency_score', 'unresolved_ratio', 'total_tickets', 'mrr_current', 'tenure_days'], 'tier_3': ['usage_per_user', 'feature_adoption_pct_mean', 'nps_trend', 'total_users'], 'interaction': ['starter_engagement_to_cost', 'starter_monthly_usage_per_user']}",
-  "class_weights": "{0: 1.0, 1: 3.480916030534351}",
-  "train_size": "821",
-  "test_size": "353"
-}

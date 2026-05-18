@@ -389,26 +389,11 @@ def build_online_shoppers_feature_table(csv_path: str | Path) -> pd.DataFrame:
 def load_dataset(data_path: str | Path = DATA_PATH) -> pd.DataFrame:
     path = Path(data_path)
     
-    # Detect Online Shoppers dataset
-    if path.name == "online_shoppers" or (path.is_dir() and any(f.name == "online_shoppers_intention.csv" for f in path.glob("*.csv"))):
-        if path.is_dir():
-            return build_online_shoppers_feature_table(path)
-        else:
-            return build_online_shoppers_feature_table(path.parent)
-    
-    # Original Ravenstack/LapisAI logic
+    # Load SaaS churn dataset from churn_analysis_datasets folder
     if path.is_dir():
         return build_churn_feature_table(path)
     if path.suffix.lower() in {".xlsx", ".xls"}:
         return pd.read_excel(path)
-    
-    # Try Online Shoppers format first
-    try:
-        df = pd.read_csv(path, sep=";")
-        if "Revenue" in df.columns:
-            return build_online_shoppers_feature_table(path)
-    except Exception:
-        pass
     
     # Fallback to standard CSV
     return pd.read_csv(path)
