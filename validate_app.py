@@ -201,14 +201,14 @@ test("Sentiment Model initialization", test_sentiment_model)
 
 def test_emoji_mappings():
     import json
-    with open("emoji_mappings.json") as f:
+    with open("emoji_mappings.json", encoding='utf-8') as f:
         emojis = json.load(f)
     assert len(emojis) >= 500, f"Emoji mappings incomplete: {len(emojis)} entries"
 test("Emoji mappings (500+ entries)", test_emoji_mappings)
 
 def test_slang_dictionary():
     import json
-    with open("slang_dictionary.json") as f:
+    with open("slang_dictionary.json", encoding='utf-8') as f:
         slang = json.load(f)
     assert len(slang) >= 200, f"Slang dictionary incomplete: {len(slang)} entries"
 test("Slang dictionary (200+ entries)", test_slang_dictionary)
@@ -221,7 +221,7 @@ print("\n[PHASE 7] Testing Page Routing (app_lapisai.py)...")
 
 def test_routing_setup():
     # Verify that app_lapisai.py has the routing configured
-    with open("app_lapisai.py") as f:
+    with open("app_lapisai.py", encoding='utf-8') as f:
         content = f.read()
     assert "Audience Chat Analysis" in content, "NLP page not in app routing"
     assert "render_audience_chat_analysis_page" in content, "NLP page function not called"
