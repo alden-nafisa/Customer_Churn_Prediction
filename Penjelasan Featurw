@@ -47,3 +47,5 @@ Ada dua pendekatan. Pendekatan prediktif murni mengalikan pendapatan bulanan rut
 Pendekatan ML: Revenue_at_Risk = MRR (Monthly Recurring Revenue) × Churn_Probability_Score
 
 Pendekatan Rule-Based: Revenue_at_Risk = Base_MRR × (Bobot_Keterlambatan_Bayar + Bobot_NPS_Buruk + Bobot_Tiket_Kritis)
+
+bisa tolong jelaskan 14-15 features itu didapat darimana dan perhitungannya/merge nya dari mana? sampai akhirnya terbentuk 14-15 features

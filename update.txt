@@ -1,2 +1,0 @@
-python validate_app.py
-streamlit run app_lapisai.py
