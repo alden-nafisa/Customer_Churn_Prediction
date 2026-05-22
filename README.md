@@ -404,6 +404,7 @@ All tests integrated. No additional test suite files needed.
 ## 🏗️ SYSTEM ARCHITECTURE
 
 ### High-Level Flow
+
 ```
 Streamlit App (app_lapisai.py)
 ├── Login System
@@ -416,6 +417,7 @@ Streamlit App (app_lapisai.py)
 ```
 
 ### Data Flow - Training
+
 ```
 churn_analysis_datasets/ (6 CSV files)
   ├── customer_accounts.csv
@@ -438,6 +440,7 @@ artifacts/ (models, metrics, SHAP explainers)
 ```
 
 ### NLP Processing
+
 ```
 youtube_chat_5_menit_cleaned.csv
   ├── Raw comments
@@ -526,21 +529,25 @@ uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
 ### 40+ Features Created from 5 Data Sources
 
 **Behavioral Features:**
+
 - `days_since_last_login` — Days since last system access
 - `avg_monthly_usage_hours` — Average monthly usage
 - `feature_adoption_trend` — Feature adoption rate over time
 
 **Financial Features:**
+
 - `revenue_at_risk` — Calculated based on MRR and churn probability
 - `payment_consistency_score` — Payment reliability metric
 - `mrr_trend` — Monthly Recurring Revenue trend
 
 **Satisfaction Features:**
+
 - `avg_nps_score` — Net Promoter Score
 - `nps_trend` — NPS trend over time
 - `critical_ticket_ratio` — Ratio of critical support tickets
 
 **Composite Features:**
+
 - `churn_risk_score` — Combined risk indicator
 - `engagement_health_score` — Engagement level (0-100)
 - `satisfaction_health_score` — Satisfaction level (0-100)
@@ -548,6 +555,7 @@ uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
 ### Plan-Specific Models
 
 Models trained separately for:
+
 - **Starter**: Entry-level customers
 - **Professional**: Mid-tier customers
 - **Enterprise**: High-value customers
@@ -559,6 +567,7 @@ Each plan gets its own XGBoost + CatBoost models.
 ## 🤖 MODEL ARCHITECTURE
 
 ### XGBoost Configuration
+
 ```python
 XGBClassifier(
     n_estimators=100,
@@ -571,6 +580,7 @@ XGBClassifier(
 ```
 
 ### CatBoost Configuration
+
 ```python
 CatBoostClassifier(
     iterations=100,
@@ -582,6 +592,7 @@ CatBoostClassifier(
 ```
 
 ### SHAP Explainability
+
 - Global SHAP: Feature importance across all predictions
 - Local SHAP: Per-customer explanation (why churn prediction?)
 - Force plots: Visualize feature contributions
@@ -591,20 +602,24 @@ CatBoostClassifier(
 ## 🎨 NLP SENTIMENT ANALYSIS
 
 ### Sentiment Classification
+
 - **Positive**: Favorable customer feedback
 - **Neutral**: Factual/balanced statements
 - **Negative**: Complaints or dissatisfaction
 
 ### Models Used
+
 - **Primary**: Naive Bayes (lightweight, fast)
 - **Alternative**: Indonesian BERT (more accurate, heavier)
 
 ### Metrics Tracked
+
 - Accuracy, Precision, Recall, F1-Score
 - Confusion Matrix
 - Per-sentiment performance
 
 ### Session Summary
+
 - Extractive summarization of YouTube chat
 - Top keywords extraction
 - Sentiment distribution chart
@@ -674,12 +689,14 @@ Customer_Churn_Prediction/
 ## 🧪 TESTING
 
 ### Unit Tests
+
 ```bash
 python nlp_test_suite.py        # NLP module tests
 python test_app_integration.py  # App integration tests
 ```
 
 ### Manual Testing Checklist
+
 - [ ] Login page authenticates
 - [ ] Dashboard loads KPI cards
 - [ ] Sentiment analysis displays charts
@@ -693,32 +710,42 @@ python test_app_integration.py  # App integration tests
 ## 🚨 TROUBLESHOOTING
 
 ### Issue: "ModuleNotFoundError: No module named 'xgboost'"
+
 **Solution**: Install all dependencies
+
 ```bash
 pip install -r requirements.txt
 ```
 
 ### Issue: "CUDA out of memory" (if using GPU)
+
 **Solution**: Use CPU instead
+
 ```bash
 # Edit app_lapisai.py, change device='cuda' to device='cpu'
 ```
 
 ### Issue: "No artifacts found"
+
 **Solution**: Run training scripts first
+
 ```bash
 python train_model.py
 python train_sentiment_model.py
 ```
 
 ### Issue: Port 8501 already in use
+
 **Solution**: Use different port
+
 ```bash
 streamlit run app_lapisai.py --server.port 8502
 ```
 
 ### Issue: Frontend shows blank page
+
 **Solution**: Check browser console (F12) for errors
+
 - Ensure MockData.jsx exists
 - Check API endpoint in .env
 - Verify npm dependencies installed
@@ -728,18 +755,21 @@ streamlit run app_lapisai.py --server.port 8502
 ## 📈 PERFORMANCE BENCHMARKS
 
 ### XGBoost Model
+
 - **Training Time**: ~2-3 minutes
 - **Inference Time**: <100ms per customer
 - **Expected Accuracy**: 87-92%
 - **Memory Usage**: ~150MB
 
 ### CatBoost Model
+
 - **Training Time**: ~2-3 minutes
 - **Inference Time**: <50ms per customer
 - **Expected Accuracy**: 88-93%
 - **Memory Usage**: ~200MB
 
 ### NLP Sentiment
+
 - **Training Time**: ~1-2 minutes
 - **Inference Time**: <500ms per comment
 - **Expected Accuracy**: 82-87%
@@ -763,7 +793,7 @@ streamlit run app_lapisai.py --server.port 8502
    - Rate limiting enabled
    - Input validation on all endpoints
 
-4. **Model Security**: 
+4. **Model Security**:
    - No PII in feature names
    - Predictions anonymized
    - SHAP explanations privacy-safe
@@ -773,12 +803,14 @@ streamlit run app_lapisai.py --server.port 8502
 ## 📚 ADDITIONAL RESOURCES
 
 ### Key Files to Understand
+
 - `train_model.py` — How to train models
 - `app_lapisai.py` — Dashboard structure
 - `01_feature_engineering.py` — Feature creation logic
 - `nlp_preprocessor.py` — NLP pipeline
 
 ### External Documentation
+
 - [Streamlit Docs](https://docs.streamlit.io)
 - [XGBoost Docs](https://xgboost.readthedocs.io)
 - [SHAP Documentation](https://shap.readthedocs.io)
@@ -789,6 +821,7 @@ streamlit run app_lapisai.py --server.port 8502
 ## 📞 SUPPORT & CONTACT
 
 For issues or questions:
+
 1. Check the troubleshooting section above
 2. Review the specific module docstrings
 3. Check browser console (F12) for frontend errors
@@ -799,6 +832,7 @@ For issues or questions:
 ## ✅ DEPLOYMENT CHECKLIST
 
 Before production deployment:
+
 - [ ] All tests passing
 - [ ] Environment variables configured
 - [ ] Models trained and artifacts saved
