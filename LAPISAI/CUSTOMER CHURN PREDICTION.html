@@ -1,200 +1,383 @@
 // ==========================================
-// TAMPILAN 2: CUSTOMER CHURN PREDICTION 
+// 4. TAMPILAN: PREDICTION (CUSTOMER CHURN)
 // ==========================================
 const PredictionView = () => {
+  const [predictionTab, setPredictionTab] = useState('individual');
+
+  const [planTypeA, setPlanTypeA] = useState('Enterprise');
+  const [customerIdA, setCustomerIdA] = useState('');
+  const [selectedModel, setSelectedModel] = useState('Ensemble');
   const [fetchState, setFetchState] = useState('idle'); 
   const [predictState, setPredictState] = useState('idle'); 
-  const [customerId, setCustomerId] = useState('');
-  const [activeModal, setActiveModal] = useState(null); 
-  
+
   const [formData, setFormData] = useState({
-    paymentDelay: '', lastLogin: '', dunning: '', nps: '', ticketRatio: '', revAtRisk: ''
+    paymentDelay: '', featureAdoption: '', supportTickets: '', lastLogin: '', annualValue: '', 
+    healthScore: '', npsScore: '', usageHours: '', threshold: '0.5'
   });
 
+  const [planTypeB, setPlanTypeB] = useState('Enterprise');
+  const [planTypeC, setPlanTypeC] = useState('Enterprise');
+
+  const formFields = [
+    { key: 'paymentDelay', label: 'Payment Delay Days', step: 1 },
+    { key: 'featureAdoption', label: 'Feature Adoption %', step: 5 },
+    { key: 'supportTickets', label: 'Support Tickets (90d)', step: 1 },
+    { key: 'lastLogin', label: 'Day Since Last Login', step: 1 },
+    { key: 'annualValue', label: 'Annual Value ($)', step: 500 },
+    { key: 'healthScore', label: 'Payment Health Score', step: 5 },
+    { key: 'npsScore', label: 'Avg NPS Score', step: 0.5 },
+    { key: 'usageHours', label: 'Monthly Usage Hours', step: 10 },
+    { key: 'threshold', label: 'Threshold', step: 0.05 }
+  ];
+
+  const handleIncrement = (key, step) => {
+    setFormData(prev => ({ ...prev, [key]: (parseFloat(prev[key] || 0) + step).toFixed(2).toString() }));
+  };
+
+  const handleDecrement = (key, step) => {
+    setFormData(prev => ({ ...prev, [key]: Math.max(0, parseFloat(prev[key] || 0) - step).toFixed(2).toString() }));
+  };
+  
+  const handleInputChange = (key, value) => setFormData(prev => ({ ...prev, [key]: value }));
+
   const handleFetch = () => {
-    if (!customerId) return;
+    if (!customerIdA) return;
     setFetchState('fetching');
     setPredictState('idle'); 
     setTimeout(() => {
       setFetchState('fetched');
       setFormData({
-        paymentDelay: '1', lastLogin: '30', dunning: '5', nps: '3', ticketRatio: '1', revAtRisk: '$ 112.58'
+        paymentDelay: '14', featureAdoption: '45', supportTickets: '3', lastLogin: '12', annualValue: '50000', 
+        healthScore: '62', npsScore: '4', usageHours: '120', threshold: '0.5'
       });
-    }, 1000);
+    }, 800);
   };
 
   const handlePredict = () => {
     if (fetchState !== 'fetched') return;
     setPredictState('predicting');
-    setTimeout(() => { setPredictState('predicted'); }, 1500);
-  };
-
-  const TableModal = ({ modalKey, onClose }) => {
-    if (!modalKey) return null;
-    const info = popupDataStore[modalKey];
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
-         <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity" onClick={onClose}></div>
-         <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
-            <div className="bg-rose-400 text-white p-4 flex items-center justify-between">
-               <div className="flex items-center gap-3">
-                  <BarChart2 size={24} className="text-white drop-shadow-sm" />
-                  <h2 className="text-base font-black tracking-wide">{info.title}</h2>
-               </div>
-               <button onClick={onClose} className="p-1 hover:bg-white/20 rounded-lg transition-colors"><X size={20} /></button>
-            </div>
-            <div className="p-6 pb-4">
-               <p className="text-[13px] font-bold text-slate-800 mb-4">{info.subtitle}</p>
-               <div className="border border-slate-200 rounded-xl overflow-hidden">
-                 <table className="w-full text-left text-[13px]">
-                    <thead className="bg-slate-50 border-b border-slate-200 text-slate-800 font-black">
-                       <tr>
-                          <th className="px-4 py-3 border-r border-slate-200 text-center">Customer ID</th>
-                          <th className="px-4 py-3 border-r border-slate-200 text-center">{info.col2Label || 'Plan Type'}</th>
-                          <th className="px-4 py-3 border-r border-slate-200 text-center">{info.col3Label}</th>
-                          {info.hasCol4 && <th className="px-4 py-3 border-r border-slate-200 text-center">{info.col4Label}</th>}
-                          <th className="px-4 py-3 text-center">Action</th>
-                       </tr>
-                    </thead>
-                    <tbody>
-                       {info.data.map((row, i) => (
-                         <tr key={i} className="border-b border-slate-100 hover:bg-slate-50/50 font-bold text-slate-700">
-                           <td className="px-4 py-2.5 border-r border-slate-100 text-center">{row.id}</td>
-                           <td className="px-4 py-2.5 border-r border-slate-100 text-center">{row.plan}</td>
-                           <td className="px-4 py-2.5 border-r border-slate-100 text-center">
-                              <span className={`px-4 py-1 rounded shadow-sm text-[11px] uppercase tracking-wider ${row.color}`}>{row.value}</span>
-                           </td>
-                           {info.hasCol4 && <td className="px-4 py-2.5 border-r border-slate-100 text-center">{row.loss}</td>}
-                           <td className="px-4 py-2.5 text-center">
-                              <button className="bg-indigo-500 hover:bg-indigo-600 text-white text-[11px] font-black px-4 py-1.5 rounded-lg shadow-sm transition-colors">{info.actionLabel}</button>
-                           </td>
-                         </tr>
-                       ))}
-                    </tbody>
-                 </table>
-               </div>
-            </div>
-         </div>
-      </div>
-    );
+    setTimeout(() => { setPredictState('predicted'); }, 1200);
   };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20 relative">
-      <TableModal modalKey={activeModal} onClose={() => setActiveModal(null)} />
-
-      <div className="flex items-center gap-3 mb-4">
-        <div className="p-1.5 bg-white border border-slate-200 text-slate-500 rounded-md shadow-sm"><Target size={18} /></div>
-        <h1 className="text-xl font-black text-slate-800 tracking-tight">Customer Churn Prediction & Analysis</h1>
+    <div className="max-w-7xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20 relative">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-2">
+        <div className="flex items-center gap-3">
+          <div className="p-1.5 bg-white border border-slate-200 text-slate-500 rounded-md shadow-sm"><Target size={18} /></div>
+          <h1 className="text-xl font-black text-slate-800 tracking-tight">Customer Churn Analysis & Prediction</h1>
+        </div>
+        <div className="flex bg-slate-200/60 p-1.5 rounded-xl w-fit border border-slate-200 shadow-inner overflow-x-auto">
+          {[
+            { id: 'individual', label: 'Individual Analysis' },
+            { id: 'overall', label: 'Overall Analysis' },
+            { id: 'evaluation', label: 'Model Evaluation' }
+          ].map(tab => (
+            <button key={tab.id} onClick={() => setPredictionTab(tab.id)} className={`px-5 py-2 rounded-lg text-xs font-black tracking-wide transition-all whitespace-nowrap ${predictionTab === tab.id ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/50'}`}>
+              {tab.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-         <div className="flex items-center justify-between p-4 border-b border-slate-100">
-            <div className="flex items-center gap-4">
-               <span className="text-[11px] font-black text-slate-800 uppercase tracking-wider">AUTO-FETCH CUSTOMER DATA</span>
-               <div className="relative w-40">
-                  <select 
-                    className="w-full appearance-none border-b border-slate-200 pb-1 pt-1 text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-500 transition-colors bg-transparent cursor-pointer"
-                    value={customerId} onChange={(e) => setCustomerId(e.target.value)}
-                  >
-                     <option value="" disabled>Input ID...</option>
-                     <option value="0011">C-0011</option>
-                  </select>
-                  <ChevronDown size={14} className="absolute right-0 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+      {/* A. INDIVIDUAL CUSTOMER RISK ASSESSMENT */}
+      {predictionTab === 'individual' && (
+      <section className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+         <div className="flex justify-between items-end border-b border-slate-200 pb-2"><h2 className="text-lg font-black text-slate-800">Individual Customer Risk Assessment</h2></div>
+         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex flex-col md:flex-row gap-6 justify-between items-center">
+            <div className="flex items-center gap-4 w-full md:w-auto">
+               <div className="flex flex-col">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase mb-1">Plan Type</label>
+                  <div className="relative w-40">
+                     <select className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-500 bg-slate-50"
+                        value={planTypeA} onChange={(e) => { setPlanTypeA(e.target.value); setCustomerIdA(''); setFetchState('idle'); setPredictState('idle'); }}>
+                        <option value="Enterprise">Enterprise</option><option value="Professional">Professional</option><option value="Starter">Starter</option>
+                     </select>
+                     <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  </div>
+               </div>
+               <div className="flex flex-col">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase mb-1">Customer ID</label>
+                  <div className="relative w-40">
+                     <select className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-500 bg-slate-50"
+                        value={customerIdA} onChange={(e) => setCustomerIdA(e.target.value)}>
+                        <option value="" disabled>Select ID...</option>
+                        {customersByPlan[planTypeA].map(id => <option key={id} value={id}>{id}</option>)}
+                     </select>
+                     <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  </div>
                </div>
             </div>
-            <div className="flex items-center gap-4">
-               {fetchState === 'fetched' && (
-                  <div className="flex items-center gap-2 bg-slate-50 px-4 py-1.5 rounded-full border border-slate-100 animate-in fade-in">
-                     <span className="text-[13px] font-bold text-slate-700">C-0011 | Acropolis LLC | Starter | Monthly | </span>
-                     <span className="bg-rose-400 text-white text-[10px] font-black px-2 py-0.5 rounded shadow-sm">CHURNED</span>
-                  </div>
-               )}
-               <button onClick={handleFetch} disabled={!customerId || fetchState === 'fetching'} className="bg-indigo-500 hover:bg-indigo-600 disabled:bg-slate-300 text-white text-xs font-bold px-6 py-2 rounded-lg shadow-sm transition-all">
-                 {fetchState === 'fetching' ? 'FETCHING...' : 'FETCH DATA'}
-               </button>
+            <button onClick={handleFetch} disabled={!customerIdA || fetchState === 'fetching'} className="w-full md:w-auto bg-indigo-500 hover:bg-indigo-600 disabled:bg-slate-300 text-white text-xs font-bold px-8 py-2.5 rounded-lg shadow-sm transition-all whitespace-nowrap">
+               {fetchState === 'fetching' ? 'FETCHING...' : 'FETCH DATA'}
+            </button>
+         </div>
+
+         <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center"><p className="text-[9px] font-bold text-slate-500 uppercase mb-1">Total Customer</p><h3 className="text-lg font-black text-slate-800">1,245</h3></div>
+            <div className="bg-rose-50 border border-rose-100 rounded-xl p-3 text-center"><p className="text-[9px] font-bold text-rose-500 uppercase mb-1">Actual Churned</p><h3 className="text-lg font-black text-rose-700">182</h3></div>
+            <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-center"><p className="text-[9px] font-bold text-amber-500 uppercase mb-1">High Risk ({'>'}50%)</p><h3 className="text-lg font-black text-amber-700">84</h3></div>
+            <div className="bg-white border border-indigo-100 rounded-xl p-3 text-center col-span-3 md:col-span-3 flex justify-around items-center">
+               <div><p className="text-[9px] font-bold text-slate-500 uppercase mb-1">XGBoost Acc</p><h3 className="text-sm font-black text-indigo-700">92.4%</h3></div><div className="w-px h-8 bg-slate-200"></div>
+               <div><p className="text-[9px] font-bold text-slate-500 uppercase mb-1">CatBoost Acc</p><h3 className="text-sm font-black text-indigo-700">91.8%</h3></div><div className="w-px h-8 bg-slate-200"></div>
+               <div><p className="text-[9px] font-bold text-slate-500 uppercase mb-1">Ensemble Acc</p><h3 className="text-sm font-black text-indigo-700">93.5%</h3></div>
             </div>
          </div>
 
-         <div className="bg-slate-100/50 p-5 flex flex-col items-center">
-            <div className="flex w-full gap-3 justify-between mb-6">
-               {[
-                 { label: 'Payment Delay Days', val: formData.paymentDelay },
-                 { label: 'Last Login 90 Days Ago', val: formData.lastLogin },
-                 { label: 'Dunning Event Count', val: formData.dunning },
-                 { label: 'Avg. NPS Score', val: formData.nps },
-                 { label: 'Critical Ticket Ratio', val: formData.ticketRatio },
-                 { label: 'Revenue at Risk', val: formData.revAtRisk }
-               ].map((field, i) => (
-                 <div key={i} className="flex-1 bg-white border border-slate-200 rounded-lg p-2.5 shadow-sm">
-                    <p className="text-[9px] font-bold text-slate-500 mb-1 leading-tight h-6">{field.label}</p>
-                    <div className="flex justify-between items-center border-b border-slate-100 pb-1">
-                       <span className="text-sm font-black text-slate-700">{field.val || '-'}</span>
-                    </div>
-                 </div>
+         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="bg-slate-50 border-b border-slate-100 p-4"><h3 className="text-[13px] font-black text-slate-800 tracking-wider">Feature Input Form</h3></div>
+            <div className="p-6">
+               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
+                  {formFields.map(field => (
+                     <div key={field.key} className="flex flex-col">
+                        <label className="text-[9px] font-bold text-slate-500 uppercase block mb-1 truncate" title={field.label}>{field.label}</label>
+                        <div className="flex items-center border border-slate-200 rounded-lg overflow-hidden bg-slate-50 focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500 transition-all">
+                           <button onClick={() => handleDecrement(field.key, field.step)} disabled={fetchState !== 'fetched'} className="px-2 py-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 disabled:opacity-30 transition-colors"><Minus size={14} /></button>
+                           <input type="number" className="w-full text-center py-1.5 text-sm font-bold text-slate-700 bg-transparent focus:outline-none" value={formData[field.key] || ''} onChange={(e) => handleInputChange(field.key, e.target.value)} disabled={fetchState !== 'fetched'} placeholder="-" />
+                           <button onClick={() => handleIncrement(field.key, field.step)} disabled={fetchState !== 'fetched'} className="px-2 py-1.5 text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 disabled:opacity-30 transition-colors"><Plus size={14} /></button>
+                        </div>
+                     </div>
+                  ))}
+               </div>
+               <div className="flex flex-col md:flex-row items-center justify-between pt-4 border-t border-slate-100 gap-4">
+                  <div className="flex items-center gap-4">
+                     <span className="text-[11px] font-bold text-slate-600 uppercase">Model Selection:</span>
+                     <div className="flex bg-slate-100 rounded-lg p-1">
+                        {['XGBoost', 'CatBoost', 'Ensemble'].map(m => (
+                           <button key={m} onClick={() => setSelectedModel(m)} className={`text-[11px] font-bold px-4 py-1.5 rounded-md transition-all ${selectedModel === m ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{m}</button>
+                        ))}
+                     </div>
+                  </div>
+                  <button onClick={handlePredict} disabled={fetchState !== 'fetched' || predictState === 'predicting'} className="bg-indigo-500 hover:bg-indigo-600 disabled:bg-slate-300 text-white text-sm font-bold px-10 py-2.5 rounded-xl shadow-md shadow-indigo-500/20 transition-all flex items-center gap-2">
+                     {predictState === 'predicting' ? <Activity size={16} className="animate-spin" /> : null}
+                     RUN PREDICTION
+                  </button>
+               </div>
+            </div>
+         </div>
+
+         {predictState === 'predicted' && (
+            <div className="bg-gradient-to-r from-rose-50 to-white rounded-2xl border border-rose-100 shadow-sm p-6 animate-in zoom-in-95 duration-500">
+               <h3 className="text-[13px] font-black text-slate-800 tracking-wider mb-4 border-b border-rose-100 pb-2">Prediction Result</h3>
+               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  <div className="space-y-4">
+                     <div>
+                        <p className="text-[10px] font-bold text-slate-500 uppercase mb-1">Customer Status</p>
+                        <div className="flex items-center gap-3">
+                           <span className="bg-rose-500 text-white text-sm font-black px-3 py-1 rounded shadow-sm tracking-wide">CHURN</span>
+                           <span className="text-xl font-black text-rose-600">85.2% Prob.</span>
+                        </div>
+                     </div>
+                     <div>
+                        <p className="text-[10px] font-bold text-slate-500 uppercase mb-1">Model Performance Rating</p>
+                        <div className="bg-amber-50 border border-amber-200 text-amber-700 text-[11px] font-bold p-2 rounded-lg flex gap-2 items-start">
+                           <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                           <p><strong>False Positive:</strong> Customer is actual <em>Not Churn</em>, but predicted <em>Churn</em>. Review risk factors below.</p>
+                        </div>
+                     </div>
+                  </div>
+                  <div className="lg:col-span-2 space-y-4">
+                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                           <p className="text-[10px] font-bold text-slate-500 uppercase mb-2">Top Risk Factors (SHAP)</p>
+                           <ul className="space-y-2 text-[11px] font-medium text-slate-700">
+                              <li className="flex justify-between items-center border-b border-slate-100 pb-1"><span>1. Payment Delay (14 Days)</span> <span className="text-rose-500 font-bold">+25% Risk</span></li>
+                              <li className="flex justify-between items-center border-b border-slate-100 pb-1"><span>2. Support Tickets (3 Unresolved)</span> <span className="text-rose-500 font-bold">+15% Risk</span></li>
+                              <li className="flex justify-between items-center border-b border-slate-100 pb-1"><span>3. NPS Score Drop (Score: 4)</span> <span className="text-rose-500 font-bold">+10% Risk</span></li>
+                           </ul>
+                        </div>
+                        <div>
+                           <p className="text-[10px] font-bold text-slate-500 uppercase mb-2">Recommended Action</p>
+                           <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3">
+                              <p className="text-[11px] font-medium text-indigo-800 leading-relaxed">
+                                 Segera hubungi PIC terkait via telepon untuk menawarkan perpanjangan masa tenggang pembayaran. Eskalasi 3 tiket support yang masih menggantung ke tim teknis tier 2 hari ini juga.
+                              </p>
+                           </div>
+                        </div>
+                     </div>
+                  </div>
+               </div>
+            </div>
+         )}
+      </section>
+      )}
+
+      {/* B. OVERALL ANALYSIS */}
+      {predictionTab === 'overall' && (
+      <section className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+         <div className="flex justify-between items-end border-b border-slate-200 pb-2">
+            <h2 className="text-lg font-black text-slate-800">Overall Analysis</h2>
+            <div className="flex items-center gap-3">
+               <label className="text-[10px] font-bold text-slate-500 uppercase">Plan Filter</label>
+               <select className="border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-slate-700 bg-slate-50 cursor-pointer" value={planTypeB} onChange={(e) => setPlanTypeB(e.target.value)}>
+                  <option value="Enterprise">Enterprise</option><option value="Professional">Professional</option><option value="Starter">Starter</option>
+               </select>
+            </div>
+         </div>
+
+         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 h-[280px] flex flex-col">
+               <h3 className="text-[12px] font-black text-slate-800 tracking-wider mb-4">Customer by Risk Level</h3>
+               <div className="flex-1 flex items-end justify-around pb-2">
+                  {[{ label: 'Low', val: 65, color: 'bg-emerald-400' }, { label: 'Medium', val: 40, color: 'bg-amber-300' }, { label: 'High', val: 25, color: 'bg-orange-400' }, { label: 'V. High', val: 15, color: 'bg-rose-500' }].map(item => (
+                     <div key={item.label} className="flex flex-col items-center gap-2 w-1/5">
+                        <span className="text-[10px] font-bold text-slate-500">{item.val}%</span>
+                        <div className={`w-full rounded-t-md transition-all hover:opacity-80 ${item.color}`} style={{ height: `${item.val * 2}px` }}></div>
+                        <span className="text-[9px] font-bold text-slate-600 uppercase">{item.label}</span>
+                     </div>
+                  ))}
+               </div>
+            </div>
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 h-[280px] flex flex-col">
+               <h3 className="text-[12px] font-black text-slate-800 tracking-wider mb-2">Churn Probability Dist. (Ensemble)</h3>
+               <p className="text-[9px] text-slate-400 mb-4">Distribusi probabilitas churn pada seluruh pelanggan</p>
+               <div className="flex-1 relative w-full border-b border-l border-slate-200 px-2 pt-4 pb-2">
+                  <svg viewBox="0 0 400 120" className="w-full h-full overflow-visible drop-shadow-sm">
+                     <path d="M0,110 Q50,20 100,50 T200,90 T300,40 T400,100" fill="none" stroke="#6366f1" strokeWidth="3" strokeLinecap="round" />
+                     <path d="M0,110 Q50,20 100,50 T200,90 T300,40 T400,100 L400,120 L0,120 Z" fill="rgba(99, 102, 241, 0.1)" />
+                  </svg>
+                  <div className="absolute w-full flex justify-between bottom-[-20px] text-[9px] font-bold text-slate-400"><span>0.0</span><span>0.25</span><span>0.5</span><span>0.75</span><span>1.0</span></div>
+               </div>
+            </div>
+         </div>
+
+         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+            <h3 className="text-[12px] font-black text-slate-800 tracking-wider mb-6 uppercase">Top Feature Dominance for Churn</h3>
+            <div className="space-y-4">
+               {featureDominance.map((f, i) => (
+                  <div key={i} className="flex items-center gap-4">
+                     <span className="text-[10px] font-bold text-slate-600 w-48 text-right truncate">{f.label}</span>
+                     <div className="flex-1 h-4 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-indigo-500 rounded-full" style={{ width: `${f.value}%` }}></div></div>
+                     <span className="text-[10px] font-black text-indigo-700 w-8">{f.value}</span>
+                  </div>
                ))}
             </div>
-            <div className="flex items-center gap-6">
-               <button onClick={handlePredict} disabled={fetchState !== 'fetched' || predictState === 'predicting'} className="bg-indigo-500 hover:bg-indigo-600 disabled:bg-slate-300 text-white text-sm font-bold px-16 py-2.5 rounded-xl shadow-lg shadow-indigo-500/30 transition-all flex items-center gap-2">
-                 {predictState === 'predicting' ? <Activity size={16} className="animate-spin" /> : null}
-                 RUN PREDICTION
-               </button>
-            </div>
-         </div>
-      </div>
-
-      {predictState === 'predicted' && (
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-in zoom-in-95 duration-500">
-         <div className="lg:col-span-4 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-            <div className="bg-slate-50 border-b border-slate-100 p-3"><h3 className="text-[13px] font-black text-slate-800 text-center tracking-wider">PREDICTION RESPONSE</h3></div>
-            <div className="p-4 space-y-4 flex-1 flex flex-col overflow-y-auto">
-               <div className="border border-slate-200 rounded-xl p-3 flex gap-3 relative overflow-hidden bg-slate-50/50">
-                  <div className="absolute top-0 left-0 bottom-0 w-1 bg-rose-400"></div>
-                  <div className="flex-1 space-y-3">
-                     <p className="text-[10px] font-bold text-slate-600 mb-0.5">RESULT & VALUE</p>
-                     <div className="flex items-center gap-2"><span className="text-[9px] font-bold text-slate-500 uppercase">Probability</span><span className="bg-rose-400 text-white text-[11px] font-black px-2 py-0.5 rounded shadow-sm">82.5%</span></div>
-                     <div className="flex items-center gap-2 mt-1"><span className="text-[9px] font-bold text-slate-500 uppercase">Status</span><span className="bg-rose-400 text-white text-[10px] font-black px-2 py-0.5 rounded shadow-sm">HIGH - RISK</span></div>
-                  </div>
-               </div>
-            </div>
          </div>
 
-         <div className="lg:col-span-8 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-            <div className="bg-slate-50 border-b border-slate-100 p-3"><h3 className="text-[13px] font-black text-slate-800 text-center tracking-wider">GLOBAL SHAP CUSTOMER</h3></div>
-            <div className="p-4 grid grid-cols-2 gap-4 flex-1">
-               <div className="border border-slate-200 rounded-xl p-4 flex flex-col">
-                  <h4 className="text-[12px] font-black text-slate-800 mb-4">Global Churn Drivers</h4>
-                  <div className="space-y-3 flex-1 flex flex-col justify-center">
-                     <div className="flex items-center justify-between text-[11px] font-bold text-slate-700 cursor-pointer group" onClick={() => setActiveModal('paymentDelay')}>
-                        <span className="group-hover:text-indigo-600 transition-colors">Payment Delay</span>
-                        <div className="w-32 h-4 bg-rose-400 flex items-center justify-end pr-2 text-white text-[9px] rounded-sm group-hover:bg-rose-500 shadow-sm transition-all">45%</div>
-                     </div>
+         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="bg-slate-50 border-b border-slate-100 p-4"><h3 className="text-[13px] font-black text-slate-800 tracking-wider uppercase">Revenue At Risk ({planTypeB})</h3></div>
+            <div className="p-5 flex flex-col md:flex-row gap-6">
+               <div className="flex flex-col gap-4 min-w-[200px]">
+                  <div className="bg-rose-50 border border-rose-100 rounded-xl p-4">
+                     <p className="text-[10px] font-bold text-rose-500 uppercase mb-1">Value at High Risk</p><h3 className="text-2xl font-black text-rose-700">$12,500</h3>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                     <div className="border border-slate-200 rounded-xl p-3"><p className="text-[9px] font-bold text-slate-500 uppercase mb-1">% of Total</p><h4 className="text-sm font-black text-slate-800">18.5%</h4></div>
+                     <div className="border border-slate-200 rounded-xl p-3"><p className="text-[9px] font-bold text-slate-500 uppercase mb-1">High Risk Cust.</p><h4 className="text-sm font-black text-slate-800">12</h4></div>
                   </div>
                </div>
-               <div className="border border-slate-200 rounded-xl p-4 row-span-2 flex flex-col items-center justify-center relative">
-                  <h4 className="text-[12px] font-black text-slate-800 absolute top-4 left-4">Support Impact on Churn</h4>
-                  <div className="w-40 h-40 relative mt-6 cursor-pointer group" onClick={() => setActiveModal('technicalIssues')}>
-                     <svg viewBox="0 0 36 36" className="w-full h-full drop-shadow-md group-hover:scale-105 transition-transform duration-300">
-                        <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#34d399" strokeWidth="4" strokeDasharray="15, 100" />
-                        <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#fbbf24" strokeWidth="4" strokeDasharray="25, 100" strokeDashoffset="-15" />
-                        <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#fb7185" strokeWidth="4" strokeDasharray="60, 100" strokeDashoffset="-40" />
-                     </svg>
-                     <div className="absolute inset-0 flex items-center justify-center flex-col pointer-events-none"><span className="text-2xl font-black text-slate-800">100%</span></div>
-                     <div className="absolute right-5 top-3 text-[10px] font-bold text-slate-700 pointer-events-none drop-shadow-sm">15%</div>
-                  </div>
-               </div>
-               <div className="border border-slate-200 rounded-xl p-4 flex flex-col relative pb-8">
-                  <h4 className="text-[12px] font-black text-slate-800 mb-4">At -Risk MRR by Segment</h4>
-                  <div className="space-y-4 flex-1 flex flex-col justify-center pr-6">
-                     <div className="flex items-center justify-between text-[11px] font-bold text-slate-700 cursor-pointer group" onClick={() => setActiveModal('enterpriseMrr')}>
-                        <span className="w-20 group-hover:text-indigo-600 transition-colors">Enterprise</span>
-                        <div className="w-32 h-4 bg-rose-400 flex items-center justify-end pr-2 text-white text-[9px] rounded-sm group-hover:bg-rose-500 shadow-sm transition-all">$12.5k</div>
-                     </div>
-                  </div>
+               <div className="flex-1 overflow-x-auto">
+                  <table className="w-full text-left text-[11px]">
+                     <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider">
+                        <tr><th className="px-4 py-2">Risk Category</th><th className="px-4 py-2 text-right">Total Value</th><th className="px-4 py-2 text-right">Cust. Count</th><th className="px-4 py-2 text-right">Avg Value/Cust</th></tr>
+                     </thead>
+                     <tbody className="font-medium text-slate-700">
+                        <tr className="border-b border-slate-50"><td className="px-4 py-2"><span className="text-rose-600 font-bold">Very High</span></td><td className="px-4 py-2 text-right">$5,000</td><td className="px-4 py-2 text-right">2</td><td className="px-4 py-2 text-right">$2,500</td></tr>
+                        <tr className="border-b border-slate-50"><td className="px-4 py-2"><span className="text-orange-500 font-bold">High</span></td><td className="px-4 py-2 text-right">$7,500</td><td className="px-4 py-2 text-right">10</td><td className="px-4 py-2 text-right">$750</td></tr>
+                        <tr className="border-b border-slate-50"><td className="px-4 py-2"><span className="text-amber-500 font-bold">Medium</span></td><td className="px-4 py-2 text-right">$15,000</td><td className="px-4 py-2 text-right">30</td><td className="px-4 py-2 text-right">$500</td></tr>
+                     </tbody>
+                  </table>
                </div>
             </div>
          </div>
-      </div>
+
+         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col h-[400px]">
+               <div className="p-4 border-b border-slate-100 bg-slate-50/50 rounded-t-2xl"><h2 className="text-[13px] font-black text-slate-800 uppercase">Top Rank At-Risk ({planTypeB})</h2></div>
+               <div className="flex-1 overflow-y-auto">
+                  <table className="w-full text-left text-[11px]">
+                     <thead className="bg-white border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider sticky top-0 shadow-sm">
+                        <tr><th className="px-4 py-2">Cust ID</th><th className="px-4 py-2 text-center">Tenure(mo)</th><th className="px-4 py-2 text-right">Annual Val</th><th className="px-4 py-2 text-center">NPS</th><th className="px-4 py-2 text-right">Risk%</th></tr>
+                     </thead>
+                     <tbody>
+                        {top15Customers.filter(c => c.plan === planTypeB).map((c, i) => (
+                           <tr key={i} className="border-b border-slate-50 hover:bg-slate-50 font-bold text-slate-700">
+                              <td className="px-4 py-2.5 text-indigo-600">{c.id}</td><td className="px-4 py-2.5 text-center">{c.tenure}</td>
+                              <td className="px-4 py-2.5 text-right">{c.annual}</td><td className="px-4 py-2.5 text-center">{c.nps}</td><td className="px-4 py-2.5 text-right text-rose-500">{c.risk}%</td>
+                           </tr>
+                        ))}
+                     </tbody>
+                  </table>
+               </div>
+            </div>
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col h-[400px]">
+               <div className="p-4 border-b border-slate-100 bg-slate-50/50 rounded-t-2xl"><h2 className="text-[13px] font-black text-slate-800 uppercase">Top 15 At-Risk Overall</h2></div>
+               <div className="flex-1 overflow-y-auto">
+                  <table className="w-full text-left text-[11px]">
+                     <thead className="bg-white border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider sticky top-0 shadow-sm">
+                        <tr><th className="px-4 py-2">Cust ID</th><th className="px-4 py-2">Plan</th><th className="px-4 py-2 text-center">Tenure(mo)</th><th className="px-4 py-2 text-right">Annual Val</th><th className="px-4 py-2 text-center">NPS</th><th className="px-4 py-2 text-right">Risk%</th></tr>
+                     </thead>
+                     <tbody>
+                        {top15Customers.map((c, i) => (
+                           <tr key={i} className="border-b border-slate-50 hover:bg-slate-50 font-bold text-slate-700">
+                              <td className="px-4 py-2.5 text-indigo-600">{c.id}</td><td className="px-4 py-2.5">{c.plan}</td>
+                              <td className="px-4 py-2.5 text-center">{c.tenure}</td><td className="px-4 py-2.5 text-right">{c.annual}</td>
+                              <td className="px-4 py-2.5 text-center">{c.nps}</td><td className="px-4 py-2.5 text-right text-rose-500">{c.risk}%</td>
+                           </tr>
+                        ))}
+                     </tbody>
+                  </table>
+               </div>
+            </div>
+         </div>
+      </section>
+      )}
+
+      {/* C. MODEL EVALUATION */}
+      {predictionTab === 'evaluation' && (
+      <section className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+         <div className="flex justify-between items-end border-b border-slate-200 pb-2">
+            <h2 className="text-lg font-black text-slate-800">Model Evaluation</h2>
+            <div className="flex items-center gap-3">
+               <label className="text-[10px] font-bold text-slate-500 uppercase">Plan Filter</label>
+               <select className="border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-slate-700 bg-slate-50 cursor-pointer" value={planTypeC} onChange={(e) => setPlanTypeC(e.target.value)}>
+                  <option value="Enterprise">Enterprise</option><option value="Professional">Professional</option><option value="Starter">Starter</option>
+               </select>
+            </div>
+         </div>
+
+         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+            <h3 className="text-[12px] font-black text-slate-800 tracking-wider mb-4 uppercase">Model Health Scorecard (Ensemble)</h3>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+               <div className="bg-slate-50 border border-slate-200 rounded-xl p-4"><p className="text-[10px] font-bold text-slate-500 uppercase mb-1 line-clamp-1">Accuracy (Correct Preds)</p><h3 className="text-2xl font-black text-indigo-600">93.5%</h3></div>
+               <div className="bg-slate-50 border border-slate-200 rounded-xl p-4"><p className="text-[10px] font-bold text-slate-500 uppercase mb-1 line-clamp-1">Recall (Catch Rate)</p><h3 className="text-2xl font-black text-indigo-600">88.2%</h3></div>
+               <div className="bg-slate-50 border border-slate-200 rounded-xl p-4"><p className="text-[10px] font-bold text-slate-500 uppercase mb-1 line-clamp-1">Precision (Pos. Accuracy)</p><h3 className="text-2xl font-black text-indigo-600">85.4%</h3></div>
+               <div className="bg-slate-50 border border-slate-200 rounded-xl p-4"><p className="text-[10px] font-bold text-slate-500 uppercase mb-1 line-clamp-1">F1-Score (Balance)</p><h3 className="text-2xl font-black text-indigo-600">86.7%</h3></div>
+            </div>
+         </div>
+
+         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex flex-col items-center justify-center">
+               <h3 className="text-[12px] font-black text-slate-800 tracking-wider mb-6 uppercase text-left w-full">Prediction Accuracy Breakdown</h3>
+               <div className="grid grid-cols-3 gap-1 w-full max-w-sm text-center text-[10px] font-bold">
+                  <div className="flex items-end justify-end p-2 text-slate-400">Actual ➔ <br/> Predicted ⬇</div>
+                  <div className="bg-slate-100 py-2 rounded-t-md text-slate-600">Actual Retained</div>
+                  <div className="bg-slate-100 py-2 rounded-t-md text-slate-600">Actual Churned</div>
+                  
+                  <div className="bg-slate-100 flex items-center justify-center rounded-l-md text-slate-600">Pred. Retained</div>
+                  <div className="bg-blue-900 text-white flex flex-col items-center justify-center py-4 rounded-sm shadow-inner"><span className="text-2xl font-black">950</span><span className="font-normal opacity-80">(True Neg)</span></div>
+                  <div className="bg-blue-200 text-blue-900 flex flex-col items-center justify-center py-4 rounded-sm"><span className="text-2xl font-black">42</span><span className="font-normal opacity-80">(False Neg)</span></div>
+                  
+                  <div className="bg-slate-100 flex items-center justify-center rounded-l-md text-slate-600">Pred. Churned</div>
+                  <div className="bg-white border-2 border-blue-200 text-blue-900 flex flex-col items-center justify-center py-4 rounded-sm"><span className="text-2xl font-black">85</span><span className="font-normal opacity-80">(False Pos)</span></div>
+                  <div className="bg-blue-500 text-white flex flex-col items-center justify-center py-4 rounded-sm shadow-inner"><span className="text-2xl font-black">168</span><span className="font-normal opacity-80">(True Pos)</span></div>
+               </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex flex-col">
+               <h3 className="text-[12px] font-black text-slate-800 tracking-wider mb-6 uppercase">Model Comparison</h3>
+               <p className="text-[10px] text-slate-500 mb-6 font-medium">High Risk Customer Detected (Count) by Model</p>
+               <div className="flex-1 flex items-end justify-around pb-6 border-b border-slate-100">
+                  <div className="flex flex-col items-center gap-2 w-1/4"><span className="text-[11px] font-black text-slate-700">145</span><div className="w-full bg-slate-300 rounded-t-md h-24 transition-all hover:bg-slate-400"></div><span className="text-[9px] font-bold text-slate-500 uppercase">XGBoost</span></div>
+                  <div className="flex flex-col items-center gap-2 w-1/4"><span className="text-[11px] font-black text-slate-700">138</span><div className="w-full bg-slate-400 rounded-t-md h-20 transition-all hover:bg-slate-500"></div><span className="text-[9px] font-bold text-slate-500 uppercase">CatBoost</span></div>
+                  <div className="flex flex-col items-center gap-2 w-1/4"><span className="text-[11px] font-black text-indigo-600">168</span><div className="w-full bg-indigo-500 rounded-t-md h-32 shadow-sm transition-all hover:bg-indigo-600"></div><span className="text-[9px] font-black text-indigo-700 uppercase">Ensemble</span></div>
+               </div>
+               <div className="mt-4 space-y-3">
+                  <div className="flex items-start gap-2 bg-indigo-50 text-indigo-800 p-3 rounded-lg text-[10px] font-medium leading-relaxed"><Info size={14} className="shrink-0 mt-0.5 text-indigo-600" /><p><strong>What this means for you:</strong> Model Ensemble (gabungan XGBoost & CatBoost) paling sensitif dalam menangkap sinyal churn tersembunyi, sehingga mendeteksi lebih banyak pelanggan berisiko tinggi.</p></div>
+                  <div className="flex items-start gap-2 text-slate-600 p-2 text-[10px] font-medium leading-relaxed"><CheckCircle2 size={14} className="shrink-0 mt-0.5 text-emerald-500" /><p><strong>Good Model Indicators:</strong> F1-Score {'>'} 85% menunjukkan model sangat dapat diandalkan untuk menyeimbangkan antara deteksi agresif (Recall) tanpa menimbulkan terlalu banyak alarm palsu (Precision).</p></div>
+               </div>
+            </div>
+         </div>
+      </section>
       )}
     </div>
   );

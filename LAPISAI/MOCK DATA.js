@@ -1,40 +1,17 @@
 import React, { useState } from 'react';
 import { 
-  BarChart3, 
-  Settings, 
-  LayoutDashboard, 
-  Bell, 
-  Menu, 
-  Activity, 
-  AlertTriangle, 
-  MessageSquare,
-  HelpCircle,
-  MoreHorizontal,
-  Mail,
-  Lock,
-  Twitter,
-  Facebook,
-  Database,
-  Search,
-  CheckCircle2,
-  Zap,
-  BrainCircuit,
-  MessageCircle,
-  PieChart,
-  Sparkles,
-  LogOut,
-  Users,
-  Target,
-  ChevronDown,
-  RefreshCw,
-  Cpu,
-  BarChart2,
-  X
+  BarChart3, Settings, LayoutDashboard, Bell, Activity, AlertTriangle, 
+  MessageSquare, HelpCircle, Mail, Lock, Database, Search, CheckCircle2, 
+  Zap, BrainCircuit, MessageCircle, PieChart, Sparkles, LogOut, Users, 
+  Target, ChevronDown, RefreshCw, Cpu, BarChart2, X, User, Quote, 
+  TrendingUp, AlertCircle, ShieldAlert, Info, Plus, Minus
 } from 'lucide-react';
 
 // ==========================================
-// MOCK DATA: DASHBOARD & SIDEBAR
+// 1. MOCK DATA GLOBAL
 // ==========================================
+
+// --- Dashboard Mock Data ---
 const summaryStats = [
   { id: 'risk', label: 'Customers at Risk', value: '1,569', chartData: [10, 25, 15, 30, 45, 35, 20], color: 'indigo' },
   { id: 'revenue', label: 'Revenue at Risk', value: '$45,200', chartData: [20, 15, 30, 25, 40, 30, 20], color: 'indigo' },
@@ -42,11 +19,11 @@ const summaryStats = [
 ];
 
 const customerChurnData = [
-  { id: 'C-0267', type: 'Starter/Monthly', score: '0,567', status: 'Not Churned', image: 'https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=40&h=40&q=80' },
-  { id: 'C-0091', type: 'Starter/Monthly', score: '0,867', status: 'Churned', image: 'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&w=40&h=40&q=80' },
-  { id: 'C-0176', type: 'Starter/Monthly', score: '0,389', status: 'Churned', image: 'https://images.unsplash.com/photo-1481481600673-c6cb160e2f32?auto=format&fit=crop&w=40&h=40&q=80' },
-  { id: 'C-0056', type: 'Starter/Monthly', score: '0,567', status: 'Churned', image: 'https://images.unsplash.com/photo-1517336714731-489689fd1ca8?auto=format&fit=crop&w=40&h=40&q=80' },
-  { id: 'C-0002', type: 'Starter/Monthly', score: '0,375', status: 'Not Churned', image: 'https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&w=40&h=40&q=80' },
+  { id: 'C-0267', type: 'Starter/Monthly', score: '0,567', status: 'Not Churned' },
+  { id: 'C-0091', type: 'Starter/Monthly', score: '0,867', status: 'Churned' },
+  { id: 'C-0176', type: 'Starter/Monthly', score: '0,389', status: 'Churned' },
+  { id: 'C-0056', type: 'Starter/Monthly', score: '0,567', status: 'Churned' },
+  { id: 'C-0002', type: 'Starter/Monthly', score: '0,375', status: 'Not Churned' },
 ];
 
 const feedbackData = [
@@ -57,100 +34,72 @@ const feedbackData = [
   { id: 'C-0002', text: 'Dokumentasi API masih kurang lengkap.', nps: 6, sentiment: 'Netral' },
 ];
 
-const highRiskAlerts = [
-  { time: '05:48AM', id: 'C-0992', type: 'Enterprise', desc: 'Probabilitas churn naik ke 85%. Segera tawarkan diskon.' },
-  { time: '10:28AM', id: 'C-0112', type: 'Professional', desc: 'Mengirimkan 3 tiket komplain hari ini' },
-  { time: '07:58PM', id: 'C-0091', type: 'Starter', desc: 'Probabilitas churn naik ke 85%. Segera dihubungi.' },
+const dashboardHighRiskAlerts = [
+  { time: '05:48AM', id: 'C-0992', type: 'Enterprise', desc: 'Kendala probabilitas churn naik ke 85%. Segera tawarkan diskon.', riskLevel: 'high' },
+  { time: '10:28AM', id: 'C-0112', type: 'Professional', desc: 'Sistem lambat saat memuat dataset. Pantau penggunaan API-nya.', riskLevel: 'warning' },
+  { time: '07:58PM', id: 'C-0091', type: 'Starter', desc: 'Aktivitas normal dan feedback positif. Terpantau sangat aman.', riskLevel: 'safe' },
 ];
 
-const systemLogs = [
-  { time: 'Just now', title: 'Stream Connected', desc: 'YouTube Live API successfully connected.', icon: <Activity size={14} className="text-emerald-500" /> },
-  { time: '2 min ago', title: 'NLP Engine Active', desc: 'Indonesian BERT model loaded for sentiment analysis.', icon: <BrainCircuit size={14} className="text-indigo-500" /> },
-  { time: '15 min ago', title: 'Model Retrained', desc: 'XGBoost model accuracy increased to 92.4%', icon: <Activity size={14} className="text-blue-500" /> },
-  { time: '1 hrs ago', title: 'Data Sync', desc: '500 new rows synced from Supabase.', icon: <Database size={14} className="text-indigo-500" /> },
+// --- Prediction Mock Data ---
+const predictionLogs = [
+  { time: '10m ago', title: 'Model Retrained', desc: 'XGBoost churn model accuracy updated to 92.4%.', icon: <Cpu size={14} className="text-indigo-500" /> },
+  { time: '30m ago', title: 'Data Sync', desc: 'Synced 2,480 rows from CRM & Billing Database.', icon: <RefreshCw size={14} className="text-blue-500" /> },
+  { time: '1h ago', title: 'Auto Action', desc: 'Dispatched 15 retention emails to high-risk users.', icon: <Zap size={14} className="text-emerald-500" /> },
+  { time: '2h ago', title: 'Data Anomaly', desc: 'Spike in payment delays detected in Enterprise tier.', icon: <AlertTriangle size={14} className="text-amber-500" /> },
+  { time: '3h ago', title: 'Pipeline Complete', desc: 'Daily churn batch prediction successfully finished.', icon: <CheckCircle2 size={14} className="text-emerald-500" /> },
 ];
 
-// ==========================================
-// MOCK DATA: PREDICTION POPUPS
-// ==========================================
-const popupDataStore = {
-  paymentDelay: {
-    title: "SEGMENT: PAYMENT DELAY DRIVERS (45%)", subtitle: "Ditemukan 124 Pelanggan berisiko karena telat bayar.",
-    data: [
-      { id: 'C-0201', plan: 'Professional', value: '45 Days', color: 'bg-rose-400 text-white' },
-      { id: 'C-0544', plan: 'Enterprise', value: '32 Days', color: 'bg-rose-400 text-white' },
-      { id: 'C-0773', plan: 'Professional', value: '28 Days', color: 'bg-indigo-500 text-white' },
-      { id: 'C-0812', plan: 'Starter', value: '20 Days', color: 'bg-amber-300 text-slate-800' }
-    ],
-    col3Label: "Delay Days", actionLabel: "Load Data"
-  },
-  forecast: {
-    title: "FORECAST: PREDICTED CHURN (NOV 2026)", subtitle: "Ditemukan 85 Pelanggan dengan probabilitas churn > 70% bulan depan.",
-    data: [
-      { id: 'C-0201', plan: 'Professional', value: '98.5%', loss: '$2.500/mo', color: 'bg-rose-400 text-white' },
-      { id: 'C-0544', plan: 'Enterprise', value: '91.2%', loss: '$1.200/mo', color: 'bg-rose-400 text-white' },
-      { id: 'C-0773', plan: 'Professional', value: '85.0%', loss: '$3.500/mo', color: 'bg-amber-300 text-slate-800' }
-    ],
-    col3Label: "Churn Prob.", actionLabel: "Load Data", hasCol4: true, col4Label: "Est. Loss"
-  },
-  enterpriseMrr: {
-    title: "SEGMENT: ENTERPRISE AT-RISK MRR ($12.5k)", subtitle: "Ditemukan 12 Pelanggan Enterprise berisiko tinggi bulan ini.",
-    data: [
-      { id: 'C-0201', plan: 'Enterprise', value: 'Kritis', loss: '$5.000/mo', color: 'bg-rose-400 text-white' },
-      { id: 'C-0544', plan: 'Enterprise', value: 'Kritis', loss: '$3.200/mo', color: 'bg-rose-400 text-white' },
-      { id: 'C-0773', plan: 'Enterprise', value: 'Waspada', loss: '$2.100/mo', color: 'bg-amber-300 text-slate-800' }
-    ],
-    col3Label: "Health", actionLabel: "Load Data", hasCol4: true, col4Label: "MRR at Risk"
-  },
-  technicalIssues: {
-    title: "SUPPORT: UNRESOLVED TECHNICAL ISSUES (60%)", subtitle: "Ditemukan 45 Tiket Teknis Terbuka dari pelanggan berisiko tinggi.",
-    data: [
-      { id: 'C-0201', plan: 'T-8812', value: 'Critical', loss: '14 Days', color: 'bg-rose-400 text-white' },
-      { id: 'C-0544', plan: 'T-8904', value: 'Critical', loss: '9 Days', color: 'bg-rose-400 text-white' },
-      { id: 'C-0773', plan: 'T-9011', value: 'High', loss: '7 Days', color: 'bg-amber-300 text-slate-800' }
-    ],
-    col2Label: "Ticket ID", col3Label: "Priority", actionLabel: "View Tkt", hasCol4: true, col4Label: "Days Unresolved"
-  }
+const predictionHighRiskAlerts = [
+  { time: '05:48AM', id: 'C-0992', type: 'Enterprise', desc: 'Kendala probabilitas churn naik ke 85%. Segera tawarkan diskon.', riskLevel: 'high' },
+  { time: '10:28AM', id: 'C-0112', type: 'Professional', desc: 'Memiliki 3 tiket komplain teknis yang belum terselesaikan.', riskLevel: 'warning' },
+];
+
+const customersByPlan = {
+  Enterprise: ['C-0992', 'C-0544', 'C-1021'],
+  Professional: ['C-0112', 'C-0201', 'C-0773'],
+  Starter: ['C-0091', 'C-0812', 'C-0056']
 };
 
-// ==========================================
-// MOCK DATA: YOUTUBE CHAT (NLP)
-// ==========================================
+const featureDominance = [
+  { label: 'nps_trend', value: 85 }, { label: 'is_on_time_sum', value: 72 }, { label: 'feature_adoption_pct_mean', value: 65 },
+  { label: 'churned', value: 50 }, { label: 'ensemble_prediction', value: 45 }, { label: 'cat_proba', value: 38 },
+  { label: 'xgb_proba', value: 30 }, { label: 'ensemble_proba', value: 25 }, { label: 'actual', value: 15 }
+];
+
+const top15Customers = [
+  { id: 'C-0992', plan: 'Enterprise', tenure: 24, annual: '$50,000', nps: 4, risk: 85 },
+  { id: 'C-0112', plan: 'Professional', tenure: 12, annual: '$12,000', nps: 5, risk: 78 },
+  { id: 'C-0544', plan: 'Enterprise', tenure: 36, annual: '$45,000', nps: 6, risk: 72 },
+  { id: 'C-0201', plan: 'Professional', tenure: 8, annual: '$10,500', nps: 3, risk: 68 },
+  { id: 'C-0091', plan: 'Starter', tenure: 3, annual: '$2,400', nps: 2, risk: 65 },
+];
+
+// --- Sentiment Mock Data ---
+const sentimentLogs = [
+  { time: 'Just now', title: 'Model Retrained', desc: 'IndoBERT model accuracy increased to 94.2%.', icon: <Cpu size={14} className="text-indigo-500" /> },
+  { time: '2m ago', title: 'Data Sync', desc: 'Fetched 5,000 new rows from YouTube API.', icon: <RefreshCw size={14} className="text-blue-500" /> },
+  { time: '5m ago', title: 'Auto Action', desc: 'Filtered 250 spam and repetitive emote messages.', icon: <Zap size={14} className="text-amber-500" /> },
+  { time: '12m ago', title: 'Data Anomaly', desc: 'Sudden spike in "Marah" emotion detected.', icon: <AlertTriangle size={14} className="text-rose-500" /> },
+];
+
+const sentimentHighRiskAlerts = [
+  { time: '14:44PM', id: '@dellyapingg', type: 'Negative Spike', desc: 'Sentimen negatif massal terkait "Opening kebesaran".', riskLevel: 'high' },
+  { time: '14:49PM', id: '@sabrnarsy', type: 'Annoyance', desc: 'Audiens jenuh dengan spam nama "Ilham".', riskLevel: 'warning' },
+];
+
+const sentimentKeywords = [
+  { word: 'Ilham', freq: 412, type: 'Netral' },
+  { word: 'Opening', freq: 289, type: 'Negative' },
+  { word: 'Lesss Goooo', freq: 205, type: 'Positive' },
+  { word: 'Nunggu', freq: 154, type: 'Negative' },
+  { word: 'Bang', freq: 142, type: 'Netral' },
+];
+
 const youtubeChatData = [
-  { time: '14:44:14', elapsed: '0:00:00', author: '@m0ndazee2', message: 'L thumbnail', sentiment: 'Netral', emotion: 'Neutral', conf: '88%' },
-  { time: '14:44:14', elapsed: '0:00:00', author: '@ranzehandsomebgt', message: 'gcc makanan gw hampir habis', sentiment: 'Netral', emotion: 'Anticipation', conf: '76%' },
-  { time: '14:44:15', elapsed: '0:00:01', author: '@sia2008', message: 'damn', sentiment: 'Negative', emotion: 'Surprise', conf: '82%' },
-  { time: '14:44:16', elapsed: '0:00:02', author: '@hostfytalhcpunk', message: 'lesss goooo', sentiment: 'Positive', emotion: 'Excitement', conf: '95%' },
-  { time: '14:44:16', elapsed: '0:00:02', author: '@dellyapingg-m8o', message: 'BANG KATA ILHAM KENAPA ITU OPENING NYA terlalu di besar besar kan', sentiment: 'Negative', emotion: 'Annoyance', conf: '91%' },
-  { time: '14:44:17', elapsed: '0:00:03', author: '@putra1-s5u', message: 'l nunggu', sentiment: 'Netral', emotion: 'Boredom', conf: '80%' },
-  { time: '14:49:10', elapsed: '0:04:56', author: '@calvin-p8r5b', message: 'akuuu', sentiment: 'Netral', emotion: 'Neutral', conf: '90%' },
-  { time: '14:49:10', elapsed: '0:04:56', author: '@MuhammadHabibie-j1p', message: 'goib', sentiment: 'Netral', emotion: 'Confusion', conf: '78%' },
-  { time: '14:49:10', elapsed: '0:04:56', author: '@gamau-n9i', message: 'BANG', sentiment: 'Netral', emotion: 'Neutral', conf: '99%' },
-  { time: '14:49:10', elapsed: '0:04:56', author: '@sabrnarsy', message: 'yaelah ilham ilhamm', sentiment: 'Negative', emotion: 'Annoyance', conf: '85%' },
-  { time: '14:49:11', elapsed: '0:04:57', author: '@LaFamme234', message: 'L ilham', sentiment: 'Negative', emotion: 'Dislike', conf: '89%' },
+  { time: '14:44:14', author: '@m0ndazee2', message: 'L thumbnail', sentiment: 'Netral', emotion: 'Biasa' },
+  { time: '14:44:14', author: '@ranzehandsome', message: 'gcc makanan gw hampir habis', sentiment: 'Netral', emotion: 'Biasa' },
+  { time: '14:44:15', author: '@sia2008', message: 'damn', sentiment: 'Negative', emotion: 'Marah' },
+  { time: '14:44:16', author: '@hostfytalh', message: 'lesss goooo', sentiment: 'Positive', emotion: 'Senang' },
+  { time: '14:44:16', author: '@dellyapingg', message: 'BANG KATA ILHAM KENAPA ITU OPENING NYA terlalu di besar besar kan', sentiment: 'Negative', emotion: 'Marah' },
+  { time: '14:44:17', author: '@putra1-s5u', message: 'l nunggu', sentiment: 'Negative', emotion: 'Sedih' },
 ];
-
-// ==========================================
-// KOMPONEN HELPER
-// ==========================================
-const Sparkline = ({ data, highlightIndex, colorClass }) => {
-  if (!data || data.length === 0) return null;
-  const max = Math.max(...data);
-  const min = Math.min(...data);
-  const height = 40;
-  const width = 120;
-  const padding = 5;
-  
-  const scaleY = (val) => height - padding - ((val - min) / (max - min)) * (height - 2 * padding);
-  const scaleX = (idx) => padding + (idx / (data.length - 1)) * (width - 2 * padding);
-  const points = data.map((val, idx) => `${scaleX(idx)},${scaleY(val)}`).join(' ');
-
-  return (
-    <svg width={width} height={height} className="overflow-visible">
-      <polyline points={points} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`text-${colorClass}-500`} />
-      {highlightIndex !== undefined && data[highlightIndex] !== undefined && (
-        <circle cx={scaleX(highlightIndex)} cy={scaleY(data[highlightIndex])} r="4" fill="#f43f5e" className="shadow-sm" />
-      )}
-    </svg>
-  );
-};

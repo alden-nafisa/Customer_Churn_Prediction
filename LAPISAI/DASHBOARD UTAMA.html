@@ -1,13 +1,17 @@
 // ==========================================
-// TAMPILAN 1: DASHBOARD UTAMA
+// 3. TAMPILAN: DASHBOARD
 // ==========================================
-const DashboardView = () => {
+const DashboardView = ({ setActiveTab }) => {
+  const [churnFilter, setChurnFilter] = useState('All');
+  const [feedbackFilter, setFeedbackFilter] = useState('All');
+
+  const filteredChurn = churnFilter === 'All' ? customerChurnData : customerChurnData.filter(c => c.status === churnFilter);
+  const filteredFeedback = feedbackFilter === 'All' ? feedbackData : feedbackData.filter(f => f.sentiment === feedbackFilter);
+
   return (
     <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-10">
       <div className="flex items-center gap-3 mb-2">
-        <div className="p-1.5 bg-white border border-slate-200 text-slate-500 rounded-md shadow-sm">
-            <LayoutDashboard size={18} />
-        </div>
+        <div className="p-1.5 bg-white border border-slate-200 text-slate-500 rounded-md shadow-sm"><LayoutDashboard size={18} /></div>
         <h1 className="text-2xl font-black text-slate-800 tracking-tight">Dashboard</h1>
       </div>
 
@@ -26,19 +30,24 @@ const DashboardView = () => {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        {/* Customer Churn Table */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col h-[550px]">
           <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 rounded-t-2xl">
             <h2 className="text-[15px] font-black text-slate-800">Customer Churn</h2>
+            <div className="flex bg-white border border-slate-200 p-1 rounded-lg shadow-sm">
+              {['All', 'Churned', 'Not Churned'].map(filter => (
+                <button key={filter} onClick={() => setChurnFilter(filter)} className={`text-[10px] font-bold px-3 py-1.5 rounded-md transition-all ${churnFilter === filter ? 'bg-indigo-50 text-indigo-700' : 'text-slate-400 hover:text-slate-600'}`}>{filter}</button>
+              ))}
+            </div>
           </div>
           <div className="px-5 py-3 grid grid-cols-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-50">
-            <span>Customer ID</span>
-            <span className="text-right">Details</span>
+            <span>Customer ID</span><span className="text-right">Details</span>
           </div>
           <div className="flex-1 overflow-y-auto p-2">
-            {customerChurnData.map((customer, idx) => (
+            {filteredChurn.map((customer, idx) => (
               <div key={idx} className="flex items-center justify-between p-3.5 hover:bg-slate-50 rounded-xl transition-colors group cursor-pointer">
                 <div className="flex items-center gap-4">
-                  <img src={customer.image} alt="avatar" className="w-9 h-9 rounded-lg object-cover border border-slate-200 shadow-sm" />
+                  <div className="w-9 h-9 rounded-lg bg-indigo-50 flex items-center justify-center border border-indigo-100 text-indigo-500 shadow-sm"><User size={16} /></div>
                   <div>
                     <p className="text-[13px] font-bold text-slate-800 group-hover:text-indigo-600 transition-colors">{customer.id}</p>
                     <p className="text-[11px] font-medium text-slate-500">{customer.type}</p>
@@ -46,25 +55,32 @@ const DashboardView = () => {
                 </div>
                 <div className="text-right flex flex-col items-end gap-1">
                   <span className="text-[13px] font-black text-slate-800">{customer.score}</span>
-                  <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${customer.status === 'Churned' ? 'bg-rose-50 text-rose-600 border-rose-100' : 'bg-emerald-50 text-emerald-600 border-emerald-100'}`}>
-                    {customer.status}
-                  </span>
+                  <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${customer.status === 'Churned' ? 'bg-rose-50 text-rose-600 border-rose-100' : 'bg-emerald-50 text-emerald-600 border-emerald-100'}`}>{customer.status}</span>
                 </div>
               </div>
             ))}
           </div>
+          <div className="p-4 border-t border-slate-100 flex items-center justify-between bg-slate-50/50 rounded-b-2xl">
+            <button onClick={() => setActiveTab('prediction')} className="bg-indigo-500 hover:bg-indigo-600 text-white text-[11px] font-bold px-5 py-2 rounded-lg shadow-sm transition-colors">All Customer</button>
+            <span className="text-[11px] font-medium text-slate-500">2,480 Total Customers</span>
+          </div>
         </div>
 
+        {/* Feedback Table */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col h-[550px]">
           <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 rounded-t-2xl">
             <h2 className="text-[15px] font-black text-slate-800">Feedback Customer</h2>
+            <div className="flex bg-white border border-slate-200 p-1 rounded-lg shadow-sm">
+              {['All', 'Positive', 'Negative', 'Netral'].map(filter => (
+                <button key={filter} onClick={() => setFeedbackFilter(filter)} className={`text-[10px] font-bold px-3 py-1.5 rounded-md transition-all ${feedbackFilter === filter ? 'bg-indigo-50 text-indigo-700' : 'text-slate-400 hover:text-slate-600'}`}>{filter}</button>
+              ))}
+            </div>
           </div>
           <div className="px-5 py-3 grid grid-cols-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-50">
-            <span>Customer ID</span>
-            <span className="text-right">Details</span>
+            <span>Customer ID</span><span className="text-right">Details</span>
           </div>
           <div className="flex-1 overflow-y-auto p-2">
-            {feedbackData.map((feedback, idx) => {
+            {filteredFeedback.map((feedback, idx) => {
               let badgeColor = 'bg-slate-100 text-slate-600 border-slate-200';
               if (feedback.sentiment === 'Positive') badgeColor = 'bg-emerald-50 text-emerald-600 border-emerald-100';
               if (feedback.sentiment === 'Negative') badgeColor = 'bg-rose-50 text-rose-600 border-rose-100';
@@ -73,23 +89,23 @@ const DashboardView = () => {
               return (
                 <div key={idx} className="flex items-start justify-between p-3.5 hover:bg-slate-50 rounded-xl transition-colors group cursor-pointer gap-4">
                   <div className="flex items-start gap-3 flex-1 min-w-0">
-                    <div className="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-500 flex items-center justify-center flex-shrink-0 mt-0.5">
-                       <MessageSquare size={14} />
-                    </div>
+                    <div className="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center border border-indigo-100 text-indigo-500 shadow-sm mt-0.5 shrink-0"><MessageSquare size={14} /></div>
                     <div className="flex-1 min-w-0">
                       <p className="text-[13px] font-bold text-slate-800 mb-0.5">{feedback.id}</p>
-                      <p className="text-[11px] font-medium text-slate-500 truncate group-hover:text-slate-700 transition-colors line-clamp-1">{feedback.text}</p>
+                      <p className="text-[11px] font-medium text-slate-500 truncate">{feedback.text}</p>
                     </div>
                   </div>
                   <div className="text-right flex flex-col items-end gap-1.5 flex-shrink-0">
                     <span className="text-[13px] font-black text-slate-800">NPS: {feedback.nps}</span>
-                    <span className={`text-[9px] font-bold px-2 py-0.5 rounded border ${badgeColor}`}>
-                      {feedback.sentiment}
-                    </span>
+                    <span className={`text-[9px] font-bold px-2 py-0.5 rounded border ${badgeColor}`}>{feedback.sentiment}</span>
                   </div>
                 </div>
               );
             })}
+          </div>
+          <div className="p-4 border-t border-slate-100 flex items-center justify-between bg-slate-50/50 rounded-b-2xl">
+            <button onClick={() => setActiveTab('sentiment')} className="bg-indigo-500 hover:bg-indigo-600 text-white text-[11px] font-bold px-5 py-2 rounded-lg shadow-sm transition-colors">All Feedback</button>
+            <span className="text-[11px] font-medium text-slate-500">1,520 Total Feedbacks</span>
           </div>
         </div>
       </div>
