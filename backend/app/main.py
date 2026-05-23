@@ -47,6 +47,7 @@ class PredictRequest(BaseModel):
     customer_id: str
     plan_type: str
     model_choice: Literal["XGBoost Only", "CatBoost Only", "Ensemble (Recommended)"] = "Ensemble (Recommended)"
+    threshold: float = Field(default=0.5, ge=0.0, le=1.0)
     overrides: Dict[str, float] = Field(default_factory=dict)
 
 
@@ -74,6 +75,30 @@ def load_eval_df() -> pd.DataFrame:
 @lru_cache(maxsize=1)
 def load_chat_df() -> pd.DataFrame:
     return _read_csv(CHAT_DATA_PATH)
+
+
+@lru_cache(maxsize=1)
+def load_prediction_results() -> pd.DataFrame:
+    """Load final prediction results joined with engineered customer features."""
+    engineered = load_engineered_df().reset_index(drop=True)
+    results = _read_csv(PROJECT_ROOT / "model_results" / "final_predictions.csv").reset_index(drop=True)
+
+    limit = min(len(engineered), len(results))
+    merged = pd.concat(
+        [engineered.iloc[:limit].copy(), results.iloc[:limit].copy()],
+        axis=1,
+    )
+
+    merged["customer_id"] = merged["customer_id"].astype(str)
+    merged["plan_type"] = merged["plan_type"].astype(str).str.capitalize()
+    merged["plan"] = merged["plan"].astype(str).str.capitalize()
+    merged["actual"] = merged["actual_churn"].astype(int)
+    merged["ensemble_proba"] = merged["churn_probability"].astype(float)
+    merged["ensemble_prediction"] = merged["prediction_threshold_0.50"].astype(int)
+    merged["xgb_proba"] = merged["xgb_probability"].astype(float)
+    merged["cat_proba"] = merged["cat_probability"].astype(float)
+    merged["risk_level"] = merged["ensemble_proba"].apply(risk_label)
+    return merged
 
 
 @lru_cache(maxsize=1)
@@ -185,6 +210,235 @@ def compute_risk_factors(row: pd.Series) -> List[Dict[str, Any]]:
     return candidates[:3]
 
 
+def classification_summary(actual: pd.Series, predicted: pd.Series) -> Dict[str, Any]:
+    """Build accuracy, recall, precision, F1, and confusion counts."""
+    actual_series = actual.astype(int)
+    predicted_series = predicted.astype(int)
+
+    tp = int(((actual_series == 1) & (predicted_series == 1)).sum())
+    tn = int(((actual_series == 0) & (predicted_series == 0)).sum())
+    fp = int(((actual_series == 0) & (predicted_series == 1)).sum())
+    fn = int(((actual_series == 1) & (predicted_series == 0)).sum())
+    total = int(len(actual_series))
+
+    accuracy = (tp + tn) / total if total else 0.0
+    recall = tp / (tp + fn) if (tp + fn) else 0.0
+    precision = tp / (tp + fp) if (tp + fp) else 0.0
+    f1 = (2 * precision * recall) / (precision + recall) if (precision + recall) else 0.0
+
+    return {
+        "accuracy": round(float(accuracy), 4),
+        "recall": round(float(recall), 4),
+        "precision": round(float(precision), 4),
+        "f1": round(float(f1), 4),
+        "counts": {"tp": tp, "tn": tn, "fp": fp, "fn": fn, "total": total},
+    }
+
+
+def build_risk_distribution(plan_df: pd.DataFrame) -> List[Dict[str, Any]]:
+    """Return risk distribution buckets for the overall analysis chart."""
+    risk_levels = pd.cut(
+        plan_df["ensemble_proba"],
+        bins=[0, 0.3, 0.5, 0.7, 1.0],
+        labels=["Low", "Medium", "High", "Very High"],
+        include_lowest=True,
+    )
+    counts = risk_levels.value_counts().reindex(["Low", "Medium", "High", "Very High"], fill_value=0)
+    return [{"label": label, "value": int(counts[label])} for label in counts.index]
+
+
+def build_probability_distribution(plan_df: pd.DataFrame, bins: int = 10) -> Dict[str, Any]:
+    """Return histogram bins for churn probability distribution."""
+    values = plan_df["ensemble_proba"].astype(float).to_numpy()
+    if len(values) == 0:
+        return {"bins": [], "counts": []}
+
+    counts, edges = np.histogram(values, bins=bins, range=(0, 1))
+    labels = [f"{edges[i]:.1f}-{edges[i + 1]:.1f}" for i in range(len(edges) - 1)]
+    return {"bins": labels, "counts": [int(value) for value in counts]}
+
+
+def build_feature_dominance(plan_df: pd.DataFrame) -> List[Dict[str, Any]]:
+    """Build the feature dominance list used by the UI chart."""
+    feature_order = [
+        "nps_trend",
+        "is_on_time_sum",
+        "feature_adoption_pct_mean",
+        "churned",
+        "ensemble_prediction",
+        "cat_proba",
+        "xgb_proba",
+        "ensemble_proba",
+        "actual",
+    ]
+
+    available = [column for column in feature_order if column in plan_df.columns]
+    if not available:
+        return []
+
+    correlations = plan_df[available].corrwith(plan_df["actual"]).abs().sort_values()
+    return [{"label": label, "value": round(float(correlations[label]), 4)} for label in correlations.index]
+
+
+def build_revenue_at_risk(plan_df: pd.DataFrame) -> Dict[str, Any]:
+    """Summarize revenue impact by risk segment."""
+    working = plan_df.copy()
+    working["risk_category"] = pd.cut(
+        working["ensemble_proba"],
+        bins=[0, 0.3, 0.5, 1.0],
+        labels=["Low", "Medium", "High"],
+        include_lowest=True,
+    )
+
+    grouped = working.groupby("risk_category", observed=False)["annual_value"].agg(["sum", "count", "mean"])
+    grouped = grouped.reindex(["Low", "Medium", "High"]).fillna(0)
+
+    rows = []
+    for category, row in grouped.iterrows():
+        rows.append(
+            {
+                "risk_category": category,
+                "total_value": round(float(row["sum"]), 4),
+                "customer_count": int(row["count"]),
+                "avg_value_per_customer": round(float(row["mean"]), 4),
+            }
+        )
+
+    high_risk_df = working[working["ensemble_proba"] > 0.5]
+    high_risk_value = float(high_risk_df["annual_value"].sum())
+    total_value = float(working["annual_value"].sum())
+    pct_of_total = (high_risk_value / total_value * 100) if total_value else 0.0
+
+    return {
+        "value_at_high_risk": round(high_risk_value, 4),
+        "pct_of_total_value": round(float(pct_of_total), 4),
+        "high_risk_customers": int(len(high_risk_df)),
+        "rows": rows,
+    }
+
+
+def build_top_customers(plan_df: pd.DataFrame, limit: int = 15) -> List[Dict[str, Any]]:
+    """Return top at-risk customers for a plan slice."""
+    top_df = plan_df.sort_values("ensemble_proba", ascending=False).head(limit).copy()
+    result: List[Dict[str, Any]] = []
+    for _, row in top_df.iterrows():
+        result.append(
+            {
+                "customer_id": str(row.get("customer_id", "")),
+                "plan": str(row.get("plan", row.get("plan_type", ""))),
+                "tenure_months": round(float(row.get("tenure_months", 0)), 4),
+                "annual_value": round(float(row.get("annual_value", 0)), 4),
+                "nps": round(float(row.get("avg_nps_score", 0)), 4),
+                "risk_pct": round(float(row.get("ensemble_proba", 0)) * 100, 1),
+            }
+        )
+    return result
+
+
+def build_model_comparison(plan_df: pd.DataFrame) -> Dict[str, Any]:
+    """Compare high-risk counts and scorecard metrics across models."""
+    xgb_pred = (plan_df["xgb_proba"] > 0.5).astype(int)
+    cat_pred = (plan_df["cat_proba"] > 0.5).astype(int)
+    ensemble_pred = plan_df["ensemble_prediction"].astype(int)
+
+    return {
+        "high_risk_detected": [
+            {"model": "XGBoost", "value": int((plan_df["xgb_proba"] > 0.5).sum())},
+            {"model": "CatBoost", "value": int((plan_df["cat_proba"] > 0.5).sum())},
+            {"model": "Ensemble", "value": int((plan_df["ensemble_proba"] > 0.5).sum())},
+        ],
+        "scorecards": {
+            "xgboost": classification_summary(plan_df["actual"], xgb_pred),
+            "catboost": classification_summary(plan_df["actual"], cat_pred),
+            "ensemble": classification_summary(plan_df["actual"], ensemble_pred),
+        },
+    }
+
+
+def build_recommendation_actions(row: pd.Series, probability: float, evaluation: str) -> List[str]:
+    """Generate concise next-step recommendations for the selected customer."""
+    actions: List[str] = []
+
+    if probability > 0.7:
+        actions.append("Contact customer immediately by phone and trigger a retention case.")
+    elif probability > 0.5:
+        actions.append("Schedule a proactive success call within 24 hours.")
+    else:
+        actions.append("Monitor the account and keep a light-touch check-in cadence.")
+
+    if float(row.get("payment_delay_days_mean", 0)) > 15:
+        actions.append("Review payment delays and offer a temporary billing resolution plan.")
+
+    if float(row.get("total_tickets", 0)) > 2:
+        actions.append("Escalate open support tickets to the technical owner.")
+
+    if float(row.get("avg_nps_score", 0)) < 6:
+        actions.append("Run an executive check-in to recover satisfaction and product fit.")
+
+    if evaluation == "FALSE_POSITIVE":
+        actions.append("Validate the latest activity before offering discounts to avoid unnecessary incentive spend.")
+
+    return actions[:4]
+
+
+def build_dashboard_summary_stats(engine: pd.DataFrame, predictions: pd.DataFrame) -> List[Dict[str, Any]]:
+    """Build the dashboard KPI cards and sparkline data from real backend values."""
+    risk_counts, _ = np.histogram(predictions["ensemble_proba"].astype(float).to_numpy(), bins=7, range=(0, 1))
+    revenue_counts, _ = np.histogram(engine["revenue_at_risk"].astype(float).to_numpy(), bins=7)
+    nps_values = engine["avg_nps_score"].astype(float).to_numpy()
+    if len(nps_values):
+        nps_counts, _ = np.histogram(nps_values, bins=7, range=(0, 10))
+        avg_nps = float(engine["avg_nps_score"].mean())
+        nps_highlight = min(len(nps_counts) - 1, max(0, int((avg_nps / 10) * len(nps_counts))))
+    else:
+        nps_counts = np.array([0, 0, 0, 0, 0, 0, 0])
+        avg_nps = 0.0
+        nps_highlight = 0
+
+    return [
+        {
+            "id": "risk",
+            "label": "Customers at Risk",
+            "value": f"{int((predictions['ensemble_proba'] > 0.5).sum()):,}",
+            "chartData": [int(value) for value in risk_counts.tolist()],
+            "color": "indigo",
+        },
+        {
+            "id": "revenue",
+            "label": "Revenue at Risk",
+            "value": f"${float(engine['revenue_at_risk'].sum()):,.0f}",
+            "chartData": [int(value) for value in revenue_counts.tolist()],
+            "color": "indigo",
+        },
+        {
+            "id": "nps",
+            "label": "Average NPS",
+            "value": f"{avg_nps:.1f}",
+            "chartData": [int(value) for value in nps_counts.tolist()],
+            "highlight": nps_highlight,
+            "color": "indigo",
+        },
+    ]
+
+
+def build_dashboard_customer_churn(limit_per_status: int = 10) -> List[Dict[str, Any]]:
+    """Return a balanced churn/non-churn sample for the dashboard table."""
+    predictions = load_prediction_results().copy()
+    churned_df = predictions[predictions["actual"] == 1].sort_values("ensemble_proba", ascending=False).head(limit_per_status)
+    retained_df = predictions[predictions["actual"] == 0].sort_values("ensemble_proba", ascending=False).head(limit_per_status)
+    combined = pd.concat([churned_df, retained_df], axis=0).head(limit_per_status * 2).copy()
+
+    combined["status"] = np.where(combined["actual"] == 1, "Churned", "Not Churned")
+    combined["type"] = combined["plan_type"].astype(str) + "/" + combined["contract_type"].astype(str)
+    combined["score"] = combined["ensemble_proba"].map(lambda value: f"{float(value):.3f}")
+
+    return (
+        combined.loc[:, ["customer_id", "type", "score", "status"]]
+        .rename(columns={"customer_id": "id"})
+        .to_dict(orient="records")
+    )
+
+
 def get_plan_summary() -> Dict[str, Any]:
     engine = load_engineered_df()
     plans = sorted(engine["plan_type"].dropna().astype(str).str.capitalize().unique().tolist())
@@ -229,14 +483,18 @@ def api_plans() -> Dict[str, Any]:
 
 
 @app.get("/api/customers")
-def api_customers(plan_type: Optional[str] = None, limit: int = 50) -> Dict[str, Any]:
+def api_customers(plan_type: Optional[str] = None, limit: int = 5000) -> Dict[str, Any]:
     engine = load_engineered_df()
     df = engine.copy()
     if plan_type:
         df = df[df["plan_type"].astype(str).str.capitalize() == normalize_plan(plan_type)]
 
+    df = df.sort_values("customer_id")
+    if limit is not None and limit > 0:
+        df = df.head(limit)
+
     rows = []
-    for _, row in df.head(limit).iterrows():
+    for _, row in df.iterrows():
         rows.append(
             {
                 "customer_id": row.get("customer_id"),
@@ -248,51 +506,73 @@ def api_customers(plan_type: Optional[str] = None, limit: int = 50) -> Dict[str,
     return {"plan_type": normalize_plan(plan_type) if plan_type else None, "customers": rows}
 
 
+@app.get("/api/churn/analysis")
+def api_churn_analysis(plan_type: Optional[str] = None) -> Dict[str, Any]:
+    predictions = load_prediction_results()
+    plan = normalize_plan(plan_type) if plan_type else sorted(predictions["plan"].unique().tolist())[0]
+    plan_df = predictions[predictions["plan"] == plan].copy()
+
+    if plan_df.empty:
+        raise HTTPException(status_code=404, detail=f"No churn analysis data found for plan: {plan}")
+
+    plan_summary = {
+        "plan_type": plan,
+        "total_customers": int(len(plan_df)),
+        "actual_churned": int(plan_df["actual"].sum()),
+        "high_risk_customers": int((plan_df["ensemble_proba"] > 0.5).sum()),
+        "model_accuracies": {
+            "xgboost": classification_summary(plan_df["actual"], (plan_df["xgb_proba"] > 0.5).astype(int))["accuracy"],
+            "catboost": classification_summary(plan_df["actual"], (plan_df["cat_proba"] > 0.5).astype(int))["accuracy"],
+            "ensemble": classification_summary(plan_df["actual"], plan_df["ensemble_prediction"])["accuracy"],
+        },
+    }
+
+    overall = {
+        "risk_distribution": build_risk_distribution(plan_df),
+        "probability_distribution": build_probability_distribution(plan_df),
+        "feature_dominance": build_feature_dominance(plan_df),
+        "revenue_at_risk": build_revenue_at_risk(plan_df),
+        "top_risk_customers": build_top_customers(plan_df, limit=15),
+        "top15_customers": build_top_customers(predictions, limit=15),
+    }
+
+    evaluation = classification_summary(plan_df["actual"], plan_df["ensemble_prediction"])
+    confusion = evaluation["counts"]
+    model_comparison = build_model_comparison(plan_df)
+
+    return {
+        "plan_type": plan,
+        "customers": sorted(plan_df["customer_id"].astype(str).unique().tolist()),
+        "plan_summary": plan_summary,
+        "overall": overall,
+        "evaluation": {
+            "scorecard": {
+                "accuracy": evaluation["accuracy"],
+                "recall": evaluation["recall"],
+                "precision": evaluation["precision"],
+                "f1": evaluation["f1"],
+            },
+            "confusion_matrix": {
+                "labels": ["Retained", "Churned"],
+                "predicted_labels": ["Retained", "Churned"],
+                "matrix": [
+                    [confusion["tn"], confusion["fp"]],
+                    [confusion["fn"], confusion["tp"]],
+                ],
+                "counts": confusion,
+            },
+            "model_comparison": model_comparison,
+        },
+    }
+
+
 @app.get("/api/dashboard/summary")
 def api_dashboard_summary() -> Dict[str, Any]:
     engine = load_engineered_df()
-    ensemble = load_ensemble_df()
-    sample_images = [
-        "https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=40&h=40&q=80",
-        "https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&w=40&h=40&q=80",
-        "https://images.unsplash.com/photo-1481481600673-c6cb160e2f32?auto=format&fit=crop&w=40&h=40&q=80",
-        "https://images.unsplash.com/photo-1517336714731-489689fd1ca8?auto=format&fit=crop&w=40&h=40&q=80",
-        "https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&w=40&h=40&q=80",
-    ]
+    predictions = load_prediction_results()
 
-    summary_stats = [
-        {
-            "id": "risk",
-            "label": "Customers at Risk",
-            "value": f"{int((ensemble['ensemble_proba'] > 0.5).sum()):,}",
-            "chartData": [10, 25, 15, 30, 45, 35, 20],
-            "color": "indigo",
-        },
-        {
-            "id": "revenue",
-            "label": "Revenue at Risk",
-            "value": f"${float(engine['revenue_at_risk'].sum()):,.0f}",
-            "chartData": [20, 15, 30, 25, 40, 30, 20],
-            "color": "indigo",
-        },
-        {
-            "id": "nps",
-            "label": "Average NPS",
-            "value": f"{float(engine['avg_nps_score'].mean()):.1f}",
-            "chartData": [5, 6, 5, 8, 7, 9, 7],
-            "highlight": 5,
-            "color": "indigo",
-        },
-    ]
-
-    customer_churn = engine.loc[:, ["customer_id", "plan_type", "contract_type", "churned"]].head(10).copy()
-    customer_churn["score"] = load_ensemble_df()["ensemble_proba"].reindex(engine.index).fillna(0).head(10)
-    customer_churn["status"] = np.where(customer_churn["churned"] == 1, "Churned", "Not Churned")
-    customer_churn["image"] = [sample_images[i % len(sample_images)] for i in range(len(customer_churn))]
-    customer_churn = customer_churn.rename(columns={"customer_id": "id", "plan_type": "type"})
-    customer_churn["type"] = customer_churn["type"].astype(str) + "/" + customer_churn["contract_type"].astype(str)
-    customer_churn["score"] = customer_churn["score"].map(lambda v: f"{float(v):.3f}")
-    customer_churn = customer_churn.drop(columns=["contract_type", "churned"])
+    summary_stats = build_dashboard_summary_stats(engine, predictions)
+    customer_churn = build_dashboard_customer_churn(limit_per_status=10)
 
     feedback_data = [
         {"id": "C-0267", "text": "UI responsif, prediksi sangat akurat.", "nps": 9, "sentiment": "Positive"},
@@ -304,7 +584,8 @@ def api_dashboard_summary() -> Dict[str, Any]:
 
     return {
         "summaryStats": summary_stats,
-        "customerChurnData": customer_churn.to_dict(orient="records"),
+        "customerChurnData": customer_churn,
+        "totalCustomers": int(len(engine)),
         "feedbackData": feedback_data,
         "plans": get_plan_summary()["plans"],
     }
@@ -387,34 +668,38 @@ def api_predict_churn(payload: PredictRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=400, detail="No valid predictions could be generated")
 
     actual_status = int(row.get("churned", 0))
-    predicted_churn = 1 if final_pred > 0.25 else 0
+    predicted_churn = 1 if final_pred > payload.threshold else 0
     evaluation, explanation = evaluation_label(actual_status, predicted_churn)
+    customer_profile = {
+        "contract_type": row.get("contract_type", "N/A"),
+        "annual_value": float(row.get("annual_value", 0)),
+        "avg_monthly_usage_hours": float(row.get("avg_monthly_usage_hours", 0)),
+        "feature_adoption_pct_mean": float(row.get("feature_adoption_pct_mean", 0)),
+        "days_since_last_login": float(row.get("days_since_last_login", 0)),
+        "total_tickets": float(row.get("total_tickets", 0)),
+        "dunning_event_count": float(row.get("dunning_event_count", 0)),
+        "critical_ticket_ratio": float(row.get("critical_ticket_ratio", 0)),
+        "payment_health_score": float(row.get("payment_health_score", 0)),
+        "avg_nps_score": float(row.get("avg_nps_score", 0)),
+        "revenue_at_risk": float(row.get("revenue_at_risk", 0)),
+    }
 
     return {
         "customer_id": payload.customer_id,
         "plan_type": plan,
         "model": model_name,
         "probability": round(final_pred, 4),
+        "threshold": round(float(payload.threshold), 4),
         "risk_level": risk_label(final_pred),
         "actual_status": actual_status,
+        "actual_status_text": "YES (Churned)" if actual_status else "NO (Retained)",
         "predicted_status": predicted_churn,
         "evaluation": evaluation,
         "explanation": explanation,
         "model_predictions": preds,
         "risk_factors": compute_risk_factors(row),
-        "customer_profile": {
-            "contract_type": row.get("contract_type", "N/A"),
-            "annual_value": float(row.get("annual_value", 0)),
-            "avg_monthly_usage_hours": float(row.get("avg_monthly_usage_hours", 0)),
-            "feature_adoption_pct_mean": float(row.get("feature_adoption_pct_mean", 0)),
-            "days_since_last_login": float(row.get("days_since_last_login", 0)),
-            "total_tickets": float(row.get("total_tickets", 0)),
-            "dunning_event_count": float(row.get("dunning_event_count", 0)),
-            "critical_ticket_ratio": float(row.get("critical_ticket_ratio", 0)),
-            "payment_health_score": float(row.get("payment_health_score", 0)),
-            "avg_nps_score": float(row.get("avg_nps_score", 0)),
-            "revenue_at_risk": float(row.get("revenue_at_risk", 0)),
-        },
+        "recommendation_actions": build_recommendation_actions(row, final_pred, evaluation),
+        "customer_profile": customer_profile,
     }
 
 

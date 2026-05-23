@@ -1,11 +1,40 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { LayoutDashboard, MessageSquare, User } from 'lucide-react'
 import { Sparkline } from './Sparkline'
-import { summaryStats, customerChurnData, feedbackData } from './MockData.jsx'
+import { apiGet } from '../lib/api'
+import { summaryStats as mockSummaryStats, customerChurnData as mockCustomerChurnData, feedbackData as mockFeedbackData } from './MockData.jsx'
 
 export default function DashboardView({ setActiveTab }) {
   const [churnFilter, setChurnFilter] = useState('All')
   const [feedbackFilter, setFeedbackFilter] = useState('All')
+  const [summaryStats, setSummaryStats] = useState(mockSummaryStats)
+  const [customerChurnData, setCustomerChurnData] = useState(mockCustomerChurnData)
+  const [feedbackData, setFeedbackData] = useState(mockFeedbackData)
+  const [totalCustomers, setTotalCustomers] = useState(2480)
+
+  useEffect(() => {
+    let isMounted = true
+
+    const loadDashboard = async () => {
+      try {
+        const data = await apiGet('/api/dashboard/summary')
+        if (!isMounted) return
+
+        if (Array.isArray(data.summaryStats) && data.summaryStats.length) setSummaryStats(data.summaryStats)
+        if (Array.isArray(data.customerChurnData) && data.customerChurnData.length) setCustomerChurnData(data.customerChurnData)
+        if (Array.isArray(data.feedbackData) && data.feedbackData.length) setFeedbackData(data.feedbackData)
+        if (typeof data.totalCustomers === 'number') setTotalCustomers(data.totalCustomers)
+      } catch (error) {
+        console.error('Failed to load dashboard summary:', error)
+      }
+    }
+
+    loadDashboard()
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
 
   const filteredChurn = churnFilter === 'All' ? customerChurnData : customerChurnData.filter(c => c.status === churnFilter)
   const filteredFeedback = feedbackFilter === 'All' ? feedbackData : feedbackData.filter(f => f.sentiment === feedbackFilter)
@@ -63,7 +92,7 @@ export default function DashboardView({ setActiveTab }) {
           </div>
           <div className="p-4 border-t border-slate-100 flex items-center justify-between bg-slate-50/50 rounded-b-2xl">
             <button onClick={() => setActiveTab('prediction')} className="bg-indigo-500 hover:bg-indigo-600 text-white text-[11px] font-bold px-5 py-2 rounded-lg shadow-sm transition-colors">All Customer</button>
-            <span className="text-[11px] font-medium text-slate-500">2,480 Total Customers</span>
+            <span className="text-[11px] font-medium text-slate-500">{totalCustomers.toLocaleString()} Total Customers</span>
           </div>
         </div>
 

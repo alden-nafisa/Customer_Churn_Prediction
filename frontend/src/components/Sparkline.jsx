@@ -7,8 +7,11 @@ export function Sparkline({ data, highlightIndex, colorClass = "indigo" }) {
   const width = 120;
   const padding = 5;
 
+  const range = max - min;
   const scaleY = (val) =>
-    height - padding - ((val - min) / (max - min)) * (height - 2 * padding);
+    range === 0
+      ? height / 2
+      : height - padding - ((val - min) / range) * (height - 2 * padding);
   const scaleX = (idx) =>
     padding + (idx / (data.length - 1)) * (width - 2 * padding);
   const points = data
