@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { Target, ChevronDown, Minus, Plus, Activity, AlertTriangle } from 'lucide-react'
-import { customersByPlan, featureDominance } from './MockData.jsx'
+import { customersByPlan, featureDominance, top15Customers } from './MockData.jsx'
 
 export default function PredictionView() {
   const [predictionTab, setPredictionTab] = useState('individual')
@@ -76,6 +76,7 @@ export default function PredictionView() {
         </div>
       </div>
 
+      {/* A. INDIVIDUAL CUSTOMER RISK ASSESSMENT */}
       {predictionTab === 'individual' && (
         <section className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
           <div className="flex justify-between items-end border-b border-slate-200 pb-2"><h2 className="text-lg font-black text-slate-800">Individual Customer Risk Assessment</h2></div>
@@ -199,6 +200,7 @@ export default function PredictionView() {
         </section>
       )}
 
+      {/* B. OVERALL ANALYSIS */}
       {predictionTab === 'overall' && (
         <section className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
           <div className="flex justify-between items-end border-b border-slate-200 pb-2">
@@ -281,6 +283,7 @@ export default function PredictionView() {
         </section>
       )}
 
+      {/* C. MODEL EVALUATION */}
       {predictionTab === 'evaluation' && (
         <section className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
           <div className="flex justify-between items-end border-b border-slate-200 pb-2">
