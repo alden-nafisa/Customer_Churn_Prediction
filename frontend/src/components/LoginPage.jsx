@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Mail, Lock, Activity } from "lucide-react";
+import { apiPost } from "../lib/api";
 
 export default function LoginPage({ onLogin }) {
   const [username, setUsername] = useState("Admin123");
@@ -9,10 +10,14 @@ export default function LoginPage({ onLogin }) {
   const handleSubmit = (e) => {
     e.preventDefault();
     setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      onLogin();
-    }, 500);
+    apiPost('/api/auth/login', { username, password })
+      .then(() => {
+        setLoading(false);
+        onLogin();
+      })
+      .catch(() => {
+        setLoading(false);
+      });
   };
 
   return (

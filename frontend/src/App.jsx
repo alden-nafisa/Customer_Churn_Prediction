@@ -9,6 +9,7 @@ import { summaryStats, customerChurnData, feedbackData, systemLogs } from './com
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [activeTab, setActiveTab] = useState('sentiment')
+  const sidebarDisplayClass = 'hidden md:flex'
 
   if (!isAuthenticated) {
     return <LoginPage onLogin={() => setIsAuthenticated(true)} />
@@ -68,7 +69,7 @@ export default function App() {
       </aside>
 
       {/* 2. Left Panel (Context/Logs/Alerts) */}
-      <aside className="w-[300px] bg-white border-r border-slate-200 h-screen overflow-y-auto flex flex-col z-10 flex-shrink-0 hidden md:flex">
+       <aside className={`w-[300px] bg-white border-r border-slate-200 h-screen overflow-y-auto flex flex-col z-10 flex-shrink-0 ${sidebarDisplayClass}`}>
         <div className="p-6">
           <div className="flex items-center gap-2 mb-8">
             <h1 className="text-2xl font-black text-slate-800 tracking-tight">Lapis<span className="text-indigo-600">AI</span></h1>

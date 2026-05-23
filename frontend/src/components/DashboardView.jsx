@@ -1,9 +1,30 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import { LayoutDashboard, MessageSquare } from 'lucide-react'
 import { Sparkline } from './Sparkline'
 import { summaryStats, customerChurnData, feedbackData } from './MockData.jsx'
+import { apiGet } from '../lib/api'
 
 export default function DashboardView() {
+  const [remoteData, setRemoteData] = useState(null)
+
+  useEffect(() => {
+    let mounted = true
+    apiGet('/api/dashboard/summary')
+      .then((data) => {
+        if (mounted) setRemoteData(data)
+      })
+      .catch(() => {
+        if (mounted) setRemoteData(null)
+      })
+    return () => {
+      mounted = false
+    }
+  }, [])
+
+  const stats = remoteData?.summaryStats || summaryStats
+  const churnData = remoteData?.customerChurnData || customerChurnData
+  const feeds = remoteData?.feedbackData || feedbackData
+
   return (
     <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-10">
       <div className="flex items-center gap-3 mb-2">
@@ -14,7 +35,7 @@ export default function DashboardView() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {summaryStats.map((stat, index) => (
+        {stats.map((stat, index) => (
           <div key={index} className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm hover:shadow-md transition-all group flex flex-col justify-between">
             <div>
               <h3 className="text-sm font-semibold text-slate-500 mb-2">{stat.label}</h3>
@@ -37,7 +58,7 @@ export default function DashboardView() {
             <span className="text-right">Details</span>
           </div>
           <div className="flex-1 overflow-y-auto p-2">
-            {customerChurnData.map((customer, idx) => (
+            {churnData.map((customer, idx) => (
               <div key={idx} className="flex items-center justify-between p-3.5 hover:bg-slate-50 rounded-xl transition-colors group cursor-pointer">
                 <div className="flex items-center gap-4">
                   <img src={customer.image} alt="avatar" className="w-9 h-9 rounded-lg object-cover border border-slate-200 shadow-sm" />
@@ -66,7 +87,7 @@ export default function DashboardView() {
             <span className="text-right">Details</span>
           </div>
           <div className="flex-1 overflow-y-auto p-2">
-            {feedbackData.map((feedback, idx) => {
+            {feeds.map((feedback, idx) => {
               let badgeColor = 'bg-slate-100 text-slate-600 border-slate-200'
               if (feedback.sentiment === 'Positive') badgeColor = 'bg-emerald-50 text-emerald-600 border-emerald-100'
               if (feedback.sentiment === 'Negative') badgeColor = 'bg-rose-50 text-rose-600 border-rose-100'

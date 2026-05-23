@@ -1,10 +1,40 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import { MessageSquare, BrainCircuit, MessageCircle, PieChart, Sparkles } from 'lucide-react'
 import { Sparkline } from './Sparkline'
 import { popupDataStore, youtubeChatData } from './MockData.jsx'
+import { apiGet } from '../lib/api'
 
 export default function SentimentView() {
   const [activeModal, setActiveModal] = React.useState(null)
+  const [analysis, setAnalysis] = useState(null)
+
+  useEffect(() => {
+    let alive = true
+    apiGet('/api/sentiment/analysis')
+      .then((data) => {
+        if (alive) setAnalysis(data)
+      })
+      .catch(() => {
+        if (alive) setAnalysis(null)
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  const summary = analysis || {
+    executive_summary:
+      'Berdasarkan analisis NLP pada 5 menit pertama sesi Live Stream, sentimen didominasi oleh respons Netral (60%) dan Antusias (20%).',
+    total_feedback: 12450,
+    sentiment_distribution: { positive: 20, negative: 20, neutral: 60 },
+    keywords: [
+      { word: 'Ilham', freq: 412, type: 'Netral' },
+      { word: 'Opening', freq: 289, type: 'Negative' },
+      { word: 'Lesss Goooo', freq: 205, type: 'Positive' },
+      { word: 'Bang', freq: 189, type: 'Netral' },
+    ],
+    raw_feedback: youtubeChatData,
+  }
 
   const TableModal = ({ modalKey, onClose }) => {
     if (!modalKey) return null
@@ -77,16 +107,16 @@ export default function SentimentView() {
         <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-slate-100">
           <div className="p-6 flex flex-col justify-center">
             <p className="text-[11px] font-bold text-slate-400 uppercase mb-2">Total Feedback Analyzed</p>
-            <h2 className="text-4xl font-black text-slate-800 tracking-tight mb-4">12,450</h2>
+            <h2 className="text-4xl font-black text-slate-800 tracking-tight mb-4">{summary.total_feedback.toLocaleString('id-ID')}</h2>
             <div className="w-full h-3 bg-slate-100 rounded-full flex overflow-hidden mb-3">
-              <div className="h-full bg-emerald-400 w-[20%]"></div>
-              <div className="h-full bg-amber-300 w-[60%]"></div>
-              <div className="h-full bg-rose-400 w-[20%]"></div>
+              <div className="h-full bg-emerald-400" style={{ width: `${summary.sentiment_distribution.positive}%` }}></div>
+              <div className="h-full bg-amber-300" style={{ width: `${summary.sentiment_distribution.neutral}%` }}></div>
+              <div className="h-full bg-rose-400" style={{ width: `${summary.sentiment_distribution.negative}%` }}></div>
             </div>
             <div className="flex justify-between text-[11px] font-bold">
-              <span className="flex items-center gap-1.5 text-slate-600"><div className="w-2 h-2 rounded-full bg-emerald-400"></div> Positive (20%)</span>
-              <span className="flex items-center gap-1.5 text-slate-600"><div className="w-2 h-2 rounded-full bg-amber-300"></div> Neutral (60%)</span>
-              <span className="flex items-center gap-1.5 text-slate-600"><div className="w-2 h-2 rounded-full bg-rose-400"></div> Negative (20%)</span>
+              <span className="flex items-center gap-1.5 text-slate-600"><div className="w-2 h-2 rounded-full bg-emerald-400"></div> Positive ({summary.sentiment_distribution.positive}%)</span>
+              <span className="flex items-center gap-1.5 text-slate-600"><div className="w-2 h-2 rounded-full bg-amber-300"></div> Neutral ({summary.sentiment_distribution.neutral}%)</span>
+              <span className="flex items-center gap-1.5 text-slate-600"><div className="w-2 h-2 rounded-full bg-rose-400"></div> Negative ({summary.sentiment_distribution.negative}%)</span>
             </div>
           </div>
           <div className="p-6 flex flex-col justify-center items-center text-center">
@@ -103,10 +133,11 @@ export default function SentimentView() {
           <div className="p-6 flex flex-col justify-center">
             <p className="text-[11px] font-bold text-slate-400 uppercase mb-4">Top Keyword Extraction</p>
             <div className="flex flex-wrap gap-2">
-              <span className="bg-rose-50 border border-rose-100 text-rose-600 text-[11px] font-bold px-3 py-1.5 rounded-lg shadow-sm">Ilham (412)</span>
-              <span className="bg-emerald-50 border border-emerald-100 text-emerald-600 text-[11px] font-bold px-3 py-1.5 rounded-lg shadow-sm">Lesss Goooo (205)</span>
-              <span className="bg-slate-50 border border-slate-200 text-slate-600 text-[11px] font-bold px-3 py-1.5 rounded-lg shadow-sm">Bang (189)</span>
-              <span className="bg-rose-50 border border-rose-100 text-rose-600 text-[11px] font-bold px-3 py-1.5 rounded-lg shadow-sm">Opening (154)</span>
+              {summary.keywords.map((row, i) => (
+                <span key={i} className={`text-[11px] font-bold px-3 py-1.5 rounded-lg shadow-sm border ${row.type === 'Positive' ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : row.type === 'Negative' ? 'bg-rose-50 border-rose-100 text-rose-600' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
+                  {row.word} ({row.freq})
+                </span>
+              ))}
             </div>
           </div>
         </div>
@@ -158,7 +189,7 @@ export default function SentimentView() {
         <div className="z-10">
           <h4 className="text-[13px] font-black text-indigo-900 mb-2 uppercase tracking-wider">SUMMARY SESSION</h4>
           <p className="text-[13px] text-slate-700 leading-relaxed font-medium">
-            Berdasarkan analisis NLP pada 5 menit pertama sesi Live Stream, sentimen didominasi oleh respons Netral (60%) dan Antusias (20%).
+            {summary.executive_summary}
           </p>
         </div>
       </div>
@@ -182,7 +213,7 @@ export default function SentimentView() {
               </tr>
             </thead>
             <tbody>
-              {youtubeChatData.map((row, i) => {
+              {summary.raw_feedback.map((row, i) => {
                 let badgeColor = 'bg-slate-100 text-slate-600 border-slate-200'
                 if (row.sentiment === 'Positive') badgeColor = 'bg-emerald-50 text-emerald-600 border-emerald-100'
                 if (row.sentiment === 'Negative') badgeColor = 'bg-rose-50 text-rose-600 border-rose-100'
