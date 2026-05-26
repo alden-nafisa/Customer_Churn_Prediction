@@ -5,10 +5,10 @@ Proyek ini membangun sistem peringatan dini churn pelanggan untuk perusahaan Saa
 - **Main model:** XGBoost
 - **Comparator model:** CatBoost
 - **Explainability:** SHAP
-- **Dashboard:** Streamlit
+- **Dashboard:** Streamlit (`app_lapisai_integrated.py`)
 - **Primary cloud database:** Supabase
-- **Backend API:** FastAPI
-- **Frontend terpisah:** Next.js
+- **Backend API:** FastAPI (optional)
+- **Frontend terpisah:** React + Vite (optional)
 
 ## Metode yang dipakai
 
@@ -35,17 +35,22 @@ Proyek ini membangun sistem peringatan dini churn pelanggan untuk perusahaan Saa
 
 ## Struktur
 
-- `churn_analysis_datasets/` — sumber utama data churn SaaS untuk training/testing dan simulasi prediksi
-- `youtube_chat_5_menit_cleaned.csv` — dataset komentar live chat yang sudah dirapikan untuk eksperimen NLP
-- `train_model.py` — melatih XGBoost dan CatBoost serta menyimpan artefak
-- `train_sentiment_model.py` — melatih model sentiment analysis untuk komentar live chat
-- `app.py` — dashboard interaktif
-- `backend/` — FastAPI service untuk prediction API dan metadata plan
-- `frontend/` — aplikasi Next.js yang memanggil API FastAPI
+- `churn_analysis_datasets/` — sumber utama data churn SaaS untuk training/testing
+- `01_feature_engineering.py` — ekstraksi dan transformasi fitur dari data mentah
+- `02_preprocessing_pipeline.py` — pembersihan, encoding, scaling, dan SMOTE
+- `03_model_training_per_plan.py` — training XGBoost dan CatBoost per plan type
+- `04_ensemble_predictions.py` — prediksi ensemble dan kombinasi bobot model
+- `05_evaluation_metrics.py` — evaluasi performa model (ROC-AUC, F1, precision, recall)
+- `06_final_predictions_holdout.py` — prediksi final pada holdout test set
+- `train_model.py` — shortcut script untuk menjalankan semua tahap training
+- `app_lapisai_integrated.py` — **dashboard Streamlit utama** (NLP + Churn Prediction terpadu)
+- `train_sentiment_model.py` — training model sentiment analysis untuk komentar
+- `youtube_chat_5_menit_cleaned.csv` — dataset live chat YouTube yang sudah dibersihkan
+- `backend/` — FastAPI service untuk prediction API (optional)
+- `frontend/` — aplikasi React/Vite (optional)
 - `src/churn_pipeline.py` — utilitas pemodelan
-- `src/supabase_config.py` — loader konfigurasi Supabase dari environment
-- `.env.example` — template variabel environment Supabase
-- `artifacts/` — model, metrik, dan output evaluasi
+- `src/supabase_config.py` — loader konfigurasi Supabase
+- `artifacts/` — model, metrik, dan output evaluasi hasil training
 
 ## Arsitektur data baru
 
@@ -82,58 +87,136 @@ Fitur tambahan yang boleh dipakai bila tersedia:
 Gunakan environment virtual yang ada di folder `.venv`, lalu install dependency:
 
 ```bash
+# Activate virtual environment
+.venv\Scripts\activate  # Windows
+source .venv/bin/activate  # Linux/Mac
+
+# Install dependencies
 pip install -r requirements.txt
+pip install -r requirements_nlp.txt  # Jika pakai NLP
 ```
 
-## Melatih model
+## Quick Start - Menjalankan Pipeline
+
+**Untuk setup pertama dari 0:**
+
+### Step 1: Data Processing & Model Training
 
 ```bash
+# Option A: Jalankan individual steps (lebih detail, dapat melihat progress tiap step)
+python 01_feature_engineering.py
+python 02_preprocessing_pipeline.py
+python 03_model_training_per_plan.py
+python 04_ensemble_predictions.py
+python 05_evaluation_metrics.py
+python 06_final_predictions_holdout.py
+
+# Option B: Jalankan semuanya dengan satu command (lebih cepat)
 python train_model.py
 ```
 
-Artefak akan disimpan ke folder `artifacts/`:
+Output: Semua artifacts disimpan di folder `artifacts/`
 
-- `xgb_pipeline.joblib`
-- `catboost_pipeline.joblib`
-- `metrics.json`
-- `test_predictions.csv`
-
-### Melatih model NLP sentiment analysis
+### Step 2: Training NLP (Optional)
 
 ```bash
 python train_sentiment_model.py
 ```
 
-Artefak NLP akan disimpan ke folder `artifacts/nlp/`:
+Output: NLP artifacts di `artifacts/nlp/`
 
-- `naive_bayes_sentiment_pipeline.pkl`
-- `sentiment_metrics.json`
-- `sentiment_test_predictions.csv`
-
-Script ini memakai teks komentar saja dan tidak menjadikan kolom sentiment sebagai input sistem.
-
-### Membuat session summary
+### Step 3: Jalankan Dashboard
 
 ```bash
-python train_session_summary.py
+streamlit run app_lapisai_integrated.py
 ```
 
-Ringkasan komentar akan disimpan ke `artifacts/nlp/`:
+Opens at: `http://localhost:8501`
 
-- `session_summary.json`
-- `session_summary.txt`
+**Note:** Model artifacts sudah tersimpan, jadi langsung bisa jalankan Step 3 tanpa perlu Step 1-2 lagi untuk session berikutnya.
 
-## Bagaimana proses klasifikasi bekerja
+## Melatih model ulang
 
-1. Data historis dibagi menjadi fitur dan label.
-2. Kolom `churned` dipakai sebagai **ground truth**:
-   - `1` = pelanggan benar-benar churn
-   - `0` = pelanggan tidak churn
-3. Model hanya melihat fitur pelanggan, bukan kolom `churned`.
-4. Data dibagi menjadi **80% training** dan **20% testing** secara stratified.
-5. SMOTE diterapkan pada data training untuk membantu menangani kelas yang tidak seimbang.
-6. XGBoost dan CatBoost dilatih pada data training untuk menghasilkan probabilitas churn.
-7. Hasil prediksi berupa probabilitas churn dan label prediksi berdasarkan threshold.
+Jika ingin retrain model dengan data baru:
+
+```bash
+# Delete old artifacts (optional, untuk clean state)
+rmdir /s artifacts  # Windows
+rm -rf artifacts    # Linux/Mac
+
+# Retrain dari awal
+python train_model.py
+
+# Atau jalankan step-by-step
+python 01_feature_engineering.py
+python 02_preprocessing_pipeline.py
+python 03_model_training_per_plan.py
+python 04_ensemble_predictions.py
+python 05_evaluation_metrics.py
+python 06_final_predictions_holdout.py
+```
+
+## Bagaimana Model Training Bekerja
+
+### Tahap-tahap Pipeline
+
+1. **Feature Engineering (01_feature_engineering.py)**
+   - Load 6 CSV dari `churn_analysis_datasets/`
+   - Ekstrak 40+ fitur kanonik dari data mentah
+   - Output: `engineered_features/lapisai_engineered_features.csv`
+
+2. **Preprocessing (02_preprocessing_pipeline.py)**
+   - Imputasi missing values
+   - Encoding kategorikal (plan_type, contract_type)
+   - Scaling fitur numerik
+   - SMOTE untuk handle class imbalance di training set
+   - Split train/test per plan type (80/20)
+   - Output: `preprocessed_data/` (per-plan train/test files)
+
+3. **Model Training (03_model_training_per_plan.py)**
+   - Train XGBoost & CatBoost untuk masing-masing plan
+   - Hyperparameter tuning
+   - Save models ke `artifacts/plan_models/`
+   - Generate SHAP explainers
+
+4. **Ensemble Predictions (04_ensemble_predictions.py)**
+   - Combine predictions dari 6 models (XGB + CatB × 3 plans)
+   - Find optimal ensemble weights
+   - Output: `artifacts/xgb_pipeline.joblib`, `catboost_pipeline.joblib`
+
+5. **Evaluation Metrics (05_evaluation_metrics.py)**
+   - Calculate ROC-AUC, F1, Precision, Recall, Accuracy
+   - Generate confusion matrix per model
+   - Output: `artifacts/metrics.json`
+
+6. **Final Predictions (06_final_predictions_holdout.py)**
+   - Predict on holdout test set
+   - Export predictions to CSV
+   - Output: `model_results/final_predictions.csv`
+
+### Model Architecture
+
+**Per-plan ensemble:**
+```
+Input Features (40+ features)
+    ↓
+[Starter Customers]     [Professional Customers]     [Enterprise Customers]
+    ↓                            ↓                             ↓
+XGB + CatB                   XGB + CatB                     XGB + CatB
+(per-plan trained)          (per-plan trained)             (per-plan trained)
+    ↓                            ↓                             ↓
+Weighted Ensemble Predictions
+    ↓
+Final Churn Risk Score (0-1)
+```
+
+### Model Output
+
+Setiap prediction menghasilkan:
+- `churn_probability` — probabilitas pelanggan churn (0-1)
+- `churn_label` — "Yes" (churn) atau "No" (tidak churn)
+- `feature_importance` — SHAP values untuk interpretabilitas
+- `risk_segment` — categorized risk level (Low/Medium/High/Critical)
 
 ## Tentang filter dashboard
 
@@ -156,7 +239,7 @@ Dashboard menyediakan penjelasan ringkas yang bisa diunduh sebagai CSV, berisi:
 ## Menjalankan dashboard
 
 ```bash
-streamlit run app.py
+streamlit run app_lapisai_integrated.py
 ```
 
 ## Menjalankan backend FastAPI
@@ -224,34 +307,60 @@ Set `NEXT_PUBLIC_API_BASE_URL` ke URL backend FastAPI, misalnya `http://127.0.0.
 
 ## 🎯 QUICK START: Python Files yang Harus Dijalankan
 
-Sebelum menjalankan `streamlit run app_lapisai.py`, pastikan file-file ini sudah dijalankan:
+Urutan eksekusi untuk setup project dari awal:
 
-### 1. **Model Training (Mandatory - Jalankan Sekali)**
+### 1. **Feature Engineering & Preprocessing (Mandatory - Jalankan Sekali)**
 
 ```bash
-# Training XGBoost & CatBoost untuk Churn Prediction
-python train_model.py
+# Step 1: Extract dan transform fitur dari raw data
+python 01_feature_engineering.py
 
-# Training NLP Sentiment Analysis (Optional - hanya jika pakai NLP)
-python train_sentiment_model.py
+# Step 2: Preprocessing, scaling, encoding, dan SMOTE
+python 02_preprocessing_pipeline.py
+
+# Step 3: Training XGBoost & CatBoost per plan type
+python 03_model_training_per_plan.py
+
+# Step 4: Generate ensemble predictions dan evaluasi
+python 04_ensemble_predictions.py
+
+# Step 5: Hitung evaluation metrics
+python 05_evaluation_metrics.py
+
+# Step 6: Final predictions pada holdout test set
+python 06_final_predictions_holdout.py
 ```
 
 **Output:** Semua artifacts disimpan di folder `artifacts/`
 
-### 2. **Menjalankan Dashboard**
+**Alternative (Shortcut):**
+```bash
+# Atau gunakan script shortcut yang menjalankan train_model.py
+python train_model.py
+```
+
+### 2. **Training NLP Sentiment Analysis (Optional - hanya jika pakai NLP)**
+
+```bash
+python train_sentiment_model.py
+```
+
+Output: NLP artifacts di `artifacts/nlp/`
+
+### 3. **Menjalankan Dashboard Streamlit**
 
 ```bash
 # Main Streamlit App (NLP + Churn Prediction Terpadu)
-streamlit run app_lapisai.py
+streamlit run app_lapisai_integrated.py
 ```
 
-### 3. **Backend FastAPI (Opsional - untuk integrasi dengan frontend)**
+### 4. **Backend FastAPI (Opsional - untuk integrasi dengan frontend)**
 
 ```bash
 uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### 4. **Frontend React (Opsional - already built dan siap di frontend/)**
+### 5. **Frontend React (Opsional - already built dan siap di frontend/)**
 
 ```bash
 cd frontend
@@ -264,31 +373,50 @@ npm run dev
 
 ```
 Customer_Churn_Prediction/
-├── train_model.py                    ← Jalankan PERTAMA (model training)
-├── train_sentiment_model.py          ← Opsional (NLP sentiment)
-├── app_lapisai.py                    ← Jalankan KEDUA (main dashboard)
-├── artifacts/                        ← Output dari train_model.py
+├── 01_feature_engineering.py          ← Jalankan PERTAMA
+├── 02_preprocessing_pipeline.py       ← Jalankan KEDUA
+├── 03_model_training_per_plan.py      ← Jalankan KETIGA
+├── 04_ensemble_predictions.py         ← Jalankan KEEMPAT
+├── 05_evaluation_metrics.py           ← Jalankan KELIMA
+├── 06_final_predictions_holdout.py    ← Jalankan KEENAM
+├── train_model.py                     ← Alternative: shortcut untuk semua steps
+├── train_sentiment_model.py           ← Optional: training NLP sentiment
+├── app_lapisai_integrated.py          ← Jalankan TERAKHIR (main dashboard)
+├── artifacts/                         ← Output dari training
 │   ├── xgb_pipeline.joblib
 │   ├── catboost_pipeline.joblib
 │   ├── metrics.json
-│   └── nlp/                          ← NLP artifacts (dari train_sentiment_model.py)
-├── churn_analysis_datasets/          ← Training data
-├── frontend/                         ← React app (sudah jadi, npm run dev)
-├── backend/                          ← FastAPI (optional)
-├── requirements.txt                  ← Python dependencies
-└── .env.example                      ← Template environment variables
+│   ├── test_predictions.csv
+│   ├── plan_models/                   ← Per-plan models
+│   └── nlp/                           ← NLP artifacts (dari train_sentiment_model.py)
+├── churn_analysis_datasets/           ← Training data (raw CSV files)
+├── engineered_features/               ← Output dari feature engineering
+├── preprocessed_data/                 ← Output dari preprocessing (train/test split)
+├── model_results/                     ← Evaluation results
+├── trained_models/                    ← Trained model artifacts
+├── youtube_chat_5_menit_cleaned.csv   ← Dataset untuk NLP
+├── frontend/                          ← React app
+├── backend/                           ← FastAPI service
+├── requirements.txt                   ← Python dependencies
+└── .env.example                       ← Template environment variables
 ```
 
 ---
 
 ## 🔑 Execution Order
 
-1. ✅ `python train_model.py` — Train XGBoost/CatBoost models
-2. ✅ `python train_sentiment_model.py` — (Optional) Train NLP sentiment model
-3. ✅ `streamlit run app_lapisai.py` — Run main dashboard
-4. 🌐 `cd frontend && npm run dev` — (Optional) Run React frontend on port 3000
+1. ✅ `python 01_feature_engineering.py` — Extract & transform features
+2. ✅ `python 02_preprocessing_pipeline.py` — Preprocess & split data
+3. ✅ `python 03_model_training_per_plan.py` — Train XGBoost/CatBoost
+4. ✅ `python 04_ensemble_predictions.py` — Generate ensemble predictions
+5. ✅ `python 05_evaluation_metrics.py` — Calculate evaluation metrics
+6. ✅ `python 06_final_predictions_holdout.py` — Final holdout predictions
+7. ✅ `python train_sentiment_model.py` — (Optional) Train NLP sentiment model
+8. ✅ `streamlit run app_lapisai_integrated.py` — Run main dashboard
+9. 🌐 `cd frontend && npm run dev` — (Optional) Run React frontend on port 3000
+10. 🔌 `uvicorn backend.app.main:app --reload` — (Optional) Run FastAPI on port 8000
 
-**Note:** Semua model artifacts sudah ada di `artifacts/`, jadi step 1-2 hanya perlu dijalankan sekali saja.
+**Note:** Semua model artifacts sudah ada di `artifacts/`, jadi step 1-7 hanya perlu dijalankan sekali saja.
 
 ---
 
@@ -314,14 +442,18 @@ Customer_Churn_Prediction/
 
 | File                              | Purpose                        | Run When                    |
 | --------------------------------- | ------------------------------ | --------------------------- |
-| `train_model.py`                  | Train XGBoost/CatBoost models  | First time setup            |
+| `01_feature_engineering.py`       | Extract & transform features   | First time setup (step 1)   |
+| `02_preprocessing_pipeline.py`    | Preprocess & train-test split  | First time setup (step 2)   |
+| `03_model_training_per_plan.py`   | Train XGBoost/CatBoost models  | First time setup (step 3)   |
+| `04_ensemble_predictions.py`      | Generate ensemble predictions  | First time setup (step 4)   |
+| `05_evaluation_metrics.py`        | Calculate evaluation metrics   | First time setup (step 5)   |
+| `06_final_predictions_holdout.py` | Final holdout predictions      | First time setup (step 6)   |
+| `train_model.py`                  | Shortcut for steps 1-6         | First time setup (alternative) |
 | `train_sentiment_model.py`        | Train NLP sentiment classifier | First time setup (optional) |
-| `app_lapisai.py`                  | Main Streamlit dashboard       | Every session               |
-| `01_feature_engineering.py`       | Feature extraction utilities   | Already integrated          |
-| `02_preprocessing_pipeline.py`    | Data preprocessing             | Already integrated          |
-| `03_ensemble_predictions.py`      | Ensemble prediction logic      | Already integrated          |
-| `04_evaluation_metrics.py`        | Model evaluation utils         | Already integrated          |
-| `05_final_predictions_holdout.py` | Holdout test predictions       | Already integrated          |
+| `app_lapisai_integrated.py`       | Main Streamlit dashboard       | Every session               |
+| `generate_nlp_visualizations.py`  | NLP visualization utilities    | Already integrated          |
+| `nlp_preprocessor.py`             | NLP text preprocessing         | Already integrated          |
+| `sentiment_model.py`              | Sentiment model utilities      | Already integrated          |
 
 ---
 
@@ -406,7 +538,7 @@ All tests integrated. No additional test suite files needed.
 ### High-Level Flow
 
 ```
-Streamlit App (app_lapisai.py)
+Streamlit App (app_lapisai_integrated.py)
 ├── Login System
 ├── Sidebar Controls (model selector, threshold)
 └── Page Router
@@ -426,37 +558,17 @@ churn_analysis_datasets/ (6 CSV files)
   ├── nps_surveys.csv
   └── support_tickets.csv
     ↓
-01_feature_engineering.py
-    ↓
-engineered_features/lapisai_engineered_features.csv
-    ↓
-02_preprocessing_pipeline.py
+01_feature_engineering.py → 02_preprocessing_pipeline.py
     ↓
 preprocessed_data/ (train/test splits per plan)
     ↓
-03_ensemble_predictions.py
+03_model_training_per_plan.py → 04_ensemble_predictions.py
+    ↓
+05_evaluation_metrics.py → 06_final_predictions_holdout.py
     ↓
 artifacts/ (models, metrics, SHAP explainers)
-```
-
-### NLP Processing
-
-```
-youtube_chat_5_menit_cleaned.csv
-  ├── Raw comments
-  ├── Sentiment labels
-  └── User metadata
     ↓
-train_sentiment_model.py
-    ├── Naive Bayes sentiment classifier
-    ├── Sentiment metrics (accuracy, precision, recall)
-    └── Test predictions
-    ↓
-artifacts/nlp/
-  ├── naive_bayes_sentiment_pipeline.pkl
-  ├── sentiment_metrics.json
-  ├── sentiment_test_predictions.csv
-  └── session_summary.json
+app_lapisai_integrated.py (load & visualize)
 ```
 
 ---
@@ -478,39 +590,50 @@ pip install -r requirements.txt
 pip install -r requirements_nlp.txt
 ```
 
-### Phase 2: Train Models (10-15 min)
+### Phase 2: Model Training & Data Processing (15-20 min)
+
+Run these scripts in order:
 
 ```bash
-# 1. Feature Engineering from raw data
+# Step 1: Feature Engineering from raw data
 python 01_feature_engineering.py
 # Output: engineered_features/lapisai_engineered_features.csv
 
-# 2. Preprocessing & train-test split
+# Step 2: Preprocessing & train-test split per plan
 python 02_preprocessing_pipeline.py
-# Output: preprocessed_data/ (train/test per plan)
+# Output: preprocessed_data/ (train/test splits)
 
-# 3. Train ensemble models (XGBoost + CatBoost)
-python 03_ensemble_predictions.py
-# Output: artifacts/ (models, metrics, SHAP)
+# Step 3: Train ensemble models (XGBoost + CatBoost)
+python 03_model_training_per_plan.py
+# Output: artifacts/plan_models/ (models per plan)
 
-# 4. Generate evaluation metrics
-python 04_evaluation_metrics.py
+# Step 4: Generate ensemble predictions
+python 04_ensemble_predictions.py
+# Output: artifacts/ (predictions + ensembles)
+
+# Step 5: Calculate evaluation metrics
+python 05_evaluation_metrics.py
 # Output: artifacts/metrics.json
 
-# 5. Final predictions on holdout set
-python 05_final_predictions_holdout.py
-# Output: artifacts/test_predictions.csv
+# Step 6: Final predictions on holdout set
+python 06_final_predictions_holdout.py
+# Output: model_results/ (final predictions)
 
-# 6. (Optional) Train NLP sentiment model
+# Optional Step 7: Train NLP sentiment model
 python train_sentiment_model.py
-# Output: artifacts/nlp/ (sentiment models)
+# Output: artifacts/nlp/ (sentiment models + metrics)
+```
+
+**Atau gunakan shortcut:**
+```bash
+python train_model.py  # Runs all steps 1-6 automatically
 ```
 
 ### Phase 3: Launch Applications (Instant)
 
 ```bash
 # Terminal 1: Main Streamlit Dashboard
-streamlit run app_lapisai.py
+streamlit run app_lapisai_integrated.py
 # Opens at http://localhost:8501
 
 # Terminal 2: (Optional) React Frontend
@@ -524,43 +647,74 @@ uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
 
 ---
 
-## 📊 FEATURE ENGINEERING DETAILS
+## 📊 PIPELINE ARCHITECTURE
 
-### 40+ Features Created from 5 Data Sources
+### Data Processing Flow
 
-**Behavioral Features:**
+```
+churn_analysis_datasets/ (6 CSV files)
+  ├── customer_accounts.csv
+  ├── billing_data.csv
+  ├── monthly_usage_metrics.csv
+  ├── nps_surveys.csv
+  ├── support_tickets.csv
+  └── metadata_dicstionary.xlsx
+    ↓
+01_feature_engineering.py
+    ↓
+engineered_features/lapisai_engineered_features.csv
+    ↓
+02_preprocessing_pipeline.py
+    ↓
+preprocessed_data/ (train/test splits per plan)
+  ├── starter_train.csv, starter_test.csv
+  ├── professional_train.csv, professional_test.csv
+  └── enterprise_train.csv, enterprise_test.csv
+    ↓
+03_model_training_per_plan.py
+    ↓
+artifacts/plan_models/ (models per plan)
+  ├── starter_xgb.joblib, starter_catboost.joblib
+  ├── professional_xgb.joblib, professional_catboost.joblib
+  └── enterprise_xgb.joblib, enterprise_catboost.joblib
+    ↓
+04_ensemble_predictions.py
+    ↓
+artifacts/
+  ├── xgb_pipeline.joblib (ensemble)
+  ├── catboost_pipeline.joblib (ensemble)
+  └── metrics.json
+    ↓
+05_evaluation_metrics.py
+    ↓
+model_results/ (final evaluation)
+  ├── ensemble_predictions.csv
+  ├── evaluation_metrics.csv
+  └── final_predictions_deployment.csv
+    ↓
+06_final_predictions_holdout.py
+    ↓
+model_results/final_predictions.csv
+```
 
-- `days_since_last_login` — Days since last system access
-- `avg_monthly_usage_hours` — Average monthly usage
-- `feature_adoption_trend` — Feature adoption rate over time
+### NLP Processing Flow
 
-**Financial Features:**
-
-- `revenue_at_risk` — Calculated based on MRR and churn probability
-- `payment_consistency_score` — Payment reliability metric
-- `mrr_trend` — Monthly Recurring Revenue trend
-
-**Satisfaction Features:**
-
-- `avg_nps_score` — Net Promoter Score
-- `nps_trend` — NPS trend over time
-- `critical_ticket_ratio` — Ratio of critical support tickets
-
-**Composite Features:**
-
-- `churn_risk_score` — Combined risk indicator
-- `engagement_health_score` — Engagement level (0-100)
-- `satisfaction_health_score` — Satisfaction level (0-100)
-
-### Plan-Specific Models
-
-Models trained separately for:
-
-- **Starter**: Entry-level customers
-- **Professional**: Mid-tier customers
-- **Enterprise**: High-value customers
-
-Each plan gets its own XGBoost + CatBoost models.
+```
+youtube_chat_5_menit_cleaned.csv
+  ├── Raw comments
+  ├── Sentiment labels
+  └── User metadata
+    ↓
+train_sentiment_model.py
+    ├── Naive Bayes sentiment classifier
+    ├── Sentiment metrics (accuracy, precision, recall)
+    └── Test predictions
+    ↓
+artifacts/nlp/
+  ├── naive_bayes_sentiment_pipeline.pkl
+  ├── sentiment_metrics.json
+  └── sentiment_test_predictions.csv
+```
 
 ---
 
@@ -635,38 +789,58 @@ Customer_Churn_Prediction/
 ├── requirements_nlp.txt                ← NLP dependencies
 ├── .env.example                        ← Environment template
 │
-├── 01_feature_engineering.py           ← Feature creation
-├── 02_preprocessing_pipeline.py        ← Train-test split & preprocessing
-├── 03_ensemble_predictions.py          ← XGBoost + CatBoost training
-├── 04_evaluation_metrics.py            ← Model evaluation
-├── 05_final_predictions_holdout.py     ← Holdout predictions
+├── Data Processing Pipeline
+├── 01_feature_engineering.py           ← Feature extraction & transformation
+├── 02_preprocessing_pipeline.py        ← Data cleaning & train-test split
+├── 03_model_training_per_plan.py       ← Train XGBoost + CatBoost per plan
+├── 04_ensemble_predictions.py          ← Ensemble prediction & weighting
+├── 05_evaluation_metrics.py            ← Model evaluation metrics
+├── 06_final_predictions_holdout.py     ← Final holdout test predictions
 │
-├── train_model.py                      ← Quick model training script
-├── train_sentiment_model.py            ← NLP sentiment training
-├── app_lapisai.py                      ← Main Streamlit dashboard
+├── Training & Application
+├── train_model.py                      ← Shortcut: run all data pipeline steps
+├── train_sentiment_model.py            ← NLP sentiment classifier training
+├── app_lapisai_integrated.py           ← Main Streamlit dashboard (NLP + Churn)
+├── analyze_model_insights.py           ← Model analysis utilities
+├── generate_nlp_visualizations.py      ← NLP visualization generation
 │
-├── churn_analysis_datasets/            ← Training data (6 CSV files)
+├── Data Folders
+├── churn_analysis_datasets/            ← Raw training data (6 CSV files)
+│   ├── customer_accounts.csv
+│   ├── billing_data.csv
+│   ├── monthly_usage_metrics.csv
+│   ├── nps_surveys.csv
+│   ├── support_tickets.csv
+│   └── metadata_dicstionary.xlsx
 ├── engineered_features/                ← Feature engineering output
-├── preprocessed_data/                  ← Preprocessed data (train/test)
-├── artifacts/                          ← Model artifacts
-│   ├── xgb_pipeline.joblib
-│   ├── catboost_pipeline.joblib
-│   ├── metrics.json
-│   ├── test_predictions.csv
-│   └── nlp/                            ← NLP models
+│   └── lapisai_engineered_features.csv
+├── preprocessed_data/                  ← Preprocessed & split data
+│   ├── starter_train.csv, starter_test.csv
+│   ├── professional_train.csv, professional_test.csv
+│   └── enterprise_train.csv, enterprise_test.csv
+├── model_results/                      ← Evaluation & prediction results
+├── trained_models/                     ← Additional trained models
+│
+├── Artifacts (Generated after training)
+├── artifacts/                          ← All model outputs
+│   ├── xgb_pipeline.joblib             ← XGBoost ensemble
+│   ├── catboost_pipeline.joblib        ← CatBoost ensemble
+│   ├── metrics.json                    ← Model metrics
+│   ├── test_predictions.csv            ← Test set predictions
+│   ├── feature_selection_summary.csv   ← Selected features
+│   ├── plan_models/                    ← Per-plan models
+│   │   ├── starter_xgb.joblib
+│   │   ├── professional_catboost.joblib
+│   │   └── enterprise_*.joblib
+│   └── nlp/                            ← NLP models & metrics
 │       ├── naive_bayes_sentiment_pipeline.pkl
 │       ├── sentiment_metrics.json
 │       └── sentiment_test_predictions.csv
 │
+├── Frontend & Backend
 ├── frontend/                           ← React app (Vite + Tailwind)
 │   ├── src/
 │   │   ├── components/
-│   │   │   ├── App.jsx
-│   │   │   ├── DashboardView.jsx
-│   │   │   ├── SentimentView.jsx
-│   │   │   ├── PredictionView.jsx
-│   │   │   ├── LoginPage.jsx
-│   │   │   └── MockData.jsx
 │   │   ├── index.jsx
 │   │   └── App.css
 │   ├── vite.config.js
@@ -679,9 +853,56 @@ Customer_Churn_Prediction/
 │   │   └── routes.py
 │   └── requirements.txt
 │
-└── src/
-    ├── churn_pipeline.py               ← ML utilities
-    └── supabase_config.py              ← Database config
+├── NLP & Utilities
+├── nlp_config.py                       ← NLP configuration
+├── nlp_preprocessor.py                 ← Text preprocessing utilities
+├── nlp_visualizations.py               ← NLP visualization
+├── sentiment_model.py                  ← Sentiment model utilities
+├── summarization_engine.py             ← Session summary extraction
+├── emoji_mappings.json                 ← Emoji-to-sentiment mapping
+├── slang_dictionary.json               ← Indonesian slang dictionary
+├── youtube_chat_5_menit_cleaned.csv    ← NLP training dataset
+├── youtube_scraper.py                  ← YouTube chat scraper
+│
+├── Database & Schema
+├── database/                           ← PostgreSQL setup scripts
+│   ├── 01_reset_and_schema_ravenstack.sql
+│   ├── 02_import_ravenstack_psql.sql
+│   ├── 03_create_ravenstack_training_views.sql
+│   ├── 04_validation_queries.sql
+│   └── README.md
+│
+├── Utilities & Config
+├── src/
+│   ├── churn_pipeline.py               ← ML utilities
+│   └── supabase_config.py              ← Supabase configuration
+├── new_pages.py                        ← Custom dashboard pages
+├── visualization_pages.py              ← Visualization utilities
+├── prepare_data_for_visualization.py   ← Data preparation for viz
+├── audience_chat_analysis_page.py      ← Chat analysis page
+├── setup_dashboard.py                  ← Dashboard setup utilities
+│
+├── Testing & Validation
+├── test_app_integration.py             ← App integration tests
+├── validate_app.py                     ← App validation suite
+├── nlp_test_suite.py                   ← NLP testing
+│
+├── Documentation & Config
+├── QUICK_START_GUIDE.py                ← Quick start guide
+├── XGBOOST_CATBOOST_DETAILED_EXPLANATION.py ← Algorithm explanation
+├── Penjelasan Featurw                  ← Feature explanations (Indonesian)
+├── render.yaml                         ← Render deployment config
+├── run_app.bat                         ← Batch file: run Streamlit
+├── start-frontend.bat                  ← Batch file: run frontend
+├── start-frontend.js                   ← Frontend startup script
+│
+├── Version Control & Environment
+├── .git/                               ← Git repository
+├── .venv/                              ← Virtual environment
+├── .env                                ← Environment variables (local)
+├── .env.example                        ← Environment template
+├── .gitignore                          ← Git ignore rules
+└── .vscode/                            ← VS Code settings
 ```
 
 ---
@@ -693,62 +914,90 @@ Customer_Churn_Prediction/
 ```bash
 python nlp_test_suite.py        # NLP module tests
 python test_app_integration.py  # App integration tests
+python validate_app.py          # Full app validation
 ```
 
 ### Manual Testing Checklist
 
-- [ ] Login page authenticates
-- [ ] Dashboard loads KPI cards
+- [ ] All training scripts run without errors (01-06)
+- [ ] Artifacts generated in `artifacts/` folder
+- [ ] `python train_sentiment_model.py` completes (optional)
+- [ ] Streamlit dashboard loads: `streamlit run app_lapisai_integrated.py`
+- [ ] Dashboard pages navigate correctly
 - [ ] Sentiment analysis displays charts
 - [ ] Churn prediction shows SHAP visualization
 - [ ] Model comparison works
 - [ ] Filter sidebar functions
 - [ ] Data export to CSV works
+- [ ] Backend API responds (if running): `curl http://localhost:8000/health`
+- [ ] Frontend loads (if running): `http://localhost:3000`
 
 ---
 
 ## 🚨 TROUBLESHOOTING
 
-### Issue: "ModuleNotFoundError: No module named 'xgboost'"
+### Issue: "Script not found" atau "No such file"
 
-**Solution**: Install all dependencies
+**Solution**: Pastikan sudah di folder project root dan file ada
+
+```bash
+cd Customer_Churn_Prediction
+ls  # or dir on Windows
+```
+
+### Issue: "ModuleNotFoundError: No module named 'xgboost'" atau dependency lain
+
+**Solution**: Install semua dependencies
 
 ```bash
 pip install -r requirements.txt
+pip install -r requirements_nlp.txt
 ```
 
-### Issue: "CUDA out of memory" (if using GPU)
+### Issue: "FileNotFoundError: churn_analysis_datasets not found"
 
-**Solution**: Use CPU instead
+**Solution**: Pastikan folder `churn_analysis_datasets/` ada dan berisi 6 CSV files
 
 ```bash
-# Edit app_lapisai.py, change device='cuda' to device='cpu'
+ls churn_analysis_datasets/
+# Harus ada: customer_accounts.csv, billing_data.csv, monthly_usage_metrics.csv, etc
 ```
 
-### Issue: "No artifacts found"
+### Issue: Training script hangs atau sangat lambat
 
-**Solution**: Run training scripts first
+**Solution**: Check system resources dan gunakan CPU instead of GPU
 
 ```bash
-python train_model.py
-python train_sentiment_model.py
+# Edit script dan set: device='cpu'
+# atau tambah di command:
+python 03_model_training_per_plan.py --device cpu
 ```
 
 ### Issue: Port 8501 already in use
 
-**Solution**: Use different port
+**Solution**: Gunakan port berbeda
 
 ```bash
-streamlit run app_lapisai.py --server.port 8502
+streamlit run app_lapisai_integrated.py --server.port 8502
 ```
 
-### Issue: Frontend shows blank page
+### Issue: "No artifacts found" saat jalankan dashboard
 
-**Solution**: Check browser console (F12) for errors
+**Solution**: Jalankan training scripts terlebih dahulu
 
-- Ensure MockData.jsx exists
-- Check API endpoint in .env
-- Verify npm dependencies installed
+```bash
+python train_model.py  # atau jalankan 01-06 secara manual
+python train_sentiment_model.py  # jika pakai NLP
+```
+
+### Issue: Dashboard blank atau error loading
+
+**Solution**: Check browser console (F12) untuk error details
+
+- Pastikan artifacts ada di folder `artifacts/`
+- Check .env file untuk Supabase credentials (jika pakai)
+- Reload page atau clear browser cache
+- Check terminal untuk Streamlit error messages
 
 ---
 
@@ -804,17 +1053,22 @@ streamlit run app_lapisai.py --server.port 8502
 
 ### Key Files to Understand
 
-- `train_model.py` — How to train models
-- `app_lapisai.py` — Dashboard structure
-- `01_feature_engineering.py` — Feature creation logic
-- `nlp_preprocessor.py` — NLP pipeline
+- `train_model.py` — Shortcut untuk menjalankan semua data pipeline
+- `01_feature_engineering.py` — Logika pembuatan fitur dan ekstraksi dari raw data
+- `02_preprocessing_pipeline.py` — Data cleaning, encoding, scaling, SMOTE
+- `03_model_training_per_plan.py` — Training logic per plan type
+- `04_ensemble_predictions.py` — Ensemble dan kombinasi model
+- `app_lapisai_integrated.py` — Struktur dan routing Streamlit dashboard
+- `nlp_preprocessor.py` — NLP text processing pipeline
+- `sentiment_model.py` — Sentiment classification utilities
 
 ### External Documentation
 
-- [Streamlit Docs](https://docs.streamlit.io)
-- [XGBoost Docs](https://xgboost.readthedocs.io)
-- [SHAP Documentation](https://shap.readthedocs.io)
-- [Supabase Docs](https://supabase.io/docs)
+- [Streamlit Docs](https://docs.streamlit.io) — Streamlit framework
+- [XGBoost Docs](https://xgboost.readthedocs.io) — XGBoost algorithm
+- [SHAP Documentation](https://shap.readthedocs.io) — Model explainability
+- [CatBoost Docs](https://catboost.ai/en/docs/) — CatBoost algorithm
+- [Supabase Docs](https://supabase.io/docs) — Database & backend
 
 ---
 
@@ -823,9 +1077,18 @@ streamlit run app_lapisai.py --server.port 8502
 For issues or questions:
 
 1. Check the troubleshooting section above
-2. Review the specific module docstrings
+2. Review the specific module docstrings in Python files
 3. Check browser console (F12) for frontend errors
-4. Enable Streamlit debug mode: `streamlit run app_lapisai.py --logger.level=debug`
+4. Enable Streamlit debug mode:
+   ```bash
+   streamlit run app_lapisai_integrated.py --logger.level=debug
+   ```
+5. Check log files in `.streamlit/` folder
+
+**Common Issues:**
+- Missing artifacts: Run `python train_model.py` first
+- Port already in use: Use different port with `--server.port XXXX`
+- Module not found: Install dependencies with `pip install -r requirements.txt`
 
 ---
 
@@ -833,18 +1096,24 @@ For issues or questions:
 
 Before production deployment:
 
-- [ ] All tests passing
-- [ ] Environment variables configured
-- [ ] Models trained and artifacts saved
-- [ ] Database migrations completed
-- [ ] Security review done
+- [ ] All training scripts completed successfully (01-06 atau train_model.py)
+- [ ] All artifacts generated in `artifacts/` folder
+- [ ] NLP model trained (optional, untuk sentiment analysis)
+- [ ] Environment variables configured (.env file)
+- [ ] Database migrations completed (Supabase setup)
+- [ ] Security review done (RLS, API credentials)
 - [ ] Performance benchmarks meet requirements
-- [ ] Error handling implemented
-- [ ] Logging configured
-- [ ] Backup strategy in place
-- [ ] Monitoring set up
+- [ ] Error handling implemented in all scripts
+- [ ] Logging configured for monitoring
+- [ ] Backup strategy in place for model artifacts
+- [ ] Monitoring set up for production
+- [ ] Unit tests passing (validate_app.py, nlp_test_suite.py)
+- [ ] Frontend build tested (npm run build in frontend/)
+- [ ] Backend API responding (GET /health, POST /api/predict)
+- [ ] Documentation reviewed and updated
 
 ---
 
-**Last Updated**: May 2026  
-**Status**: Production Ready ✅
+**Last Updated**: May 23, 2026  
+**Project Status**: Production Ready ✅  
+**Latest Changes**: Full pipeline refactoring with per-plan models, enhanced NLP integration, and comprehensive documentation
