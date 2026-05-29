@@ -6,6 +6,8 @@ Mengintegrasikan hasil model churn dan analisis NLP dalam satu aplikasi.
 import json
 import os
 import pickle
+import re
+import time
 from pathlib import Path
 from collections import Counter
 
@@ -14,6 +16,16 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+
+# ========== NLP & API IMPORTS ==========
+from dotenv import load_dotenv
+import emoji
+import nltk
+import torch  # <-- Menambahkan PyTorch untuk library transformers
+import google.generativeai as genai  # <-- Diperbarui menggunakan standar stabil
+from nltk.corpus import stopwords
+from transformers import pipeline
+from googleapiclient.discovery import build
 
 # ========== CONFIG ==========
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -24,6 +36,20 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ========== LOAD ENV VARIABLES ==========
+# Membaca API Key dari file .env secara otomatis
+load_dotenv()
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-2.0-flash")
+
+# Menggunakan metode konfigurasi standar agar tidak bentrok dengan versi library
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    gemini_ready = True
+else:
+    gemini_ready = False
+
 # ========== PATHS ==========
 ENGINEERED_FEATURES_PATH = PROJECT_ROOT / "engineered_features" / "lapisai_engineered_features.csv"
 ENSEMBLE_PREDICTIONS_PATH = PROJECT_ROOT / "model_results" / "ensemble_predictions.csv"
@@ -32,7 +58,7 @@ TRAINED_MODELS_DIR = PROJECT_ROOT / "trained_models" / "plan_specific"
 NLP_ARTIFACTS_DIR = PROJECT_ROOT / "artifacts" / "nlp"
 CHAT_DATA_PATH = PROJECT_ROOT / "youtube_chat_5_menit_cleaned.csv"
 
-# ========== LOAD DATA ==========
+# ========== LOAD DATA (CHURN) ==========
 @st.cache_data
 def load_engineered_features():
     """Load engineered features for customer analysis."""
@@ -53,13 +79,6 @@ def load_evaluation_metrics():
     if not EVALUATION_METRICS_PATH.exists():
         return None
     return pd.read_csv(EVALUATION_METRICS_PATH)
-
-@st.cache_data
-def load_chat_data():
-    """Load YouTube chat data for sentiment analysis."""
-    if not CHAT_DATA_PATH.exists():
-        return None
-    return pd.read_csv(CHAT_DATA_PATH)
 
 def load_trained_models(plan_type="Starter"):
     """Load trained XGBoost and CatBoost models for specified plan."""
@@ -154,7 +173,149 @@ def safe_get(row, *column_names, default=None):
             return row[col]
     return default if default is not None else "N/A"
 
+# ========== NLP CORE FUNCTIONS ==========
+
+@st.cache_resource
+def load_nlp_pipeline():
+    """Load IndoBERT model and stopwords dict (Cached for speed)"""
+    # Menggunakan Model IndoBERT Asli
+    indobert = pipeline(
+        "sentiment-analysis",
+        model="mdhugol/indonesia-bert-sentiment-classification",
+        tokenizer="mdhugol/indonesia-bert-sentiment-classification"
+    )
+    # Ensure we have stopwords available.
+    nltk_data_local = NLP_ARTIFACTS_DIR / "nltk_data"
+    try:
+        nltk.download('stopwords', quiet=True)
+        stop_words_eng = set(stopwords.words('english'))
+    except Exception:
+        try:
+            nltk_data_local.mkdir(parents=True, exist_ok=True)
+            nltk.download('stopwords', download_dir=str(nltk_data_local), quiet=True)
+            if str(nltk_data_local) not in nltk.data.path:
+                nltk.data.path.append(str(nltk_data_local))
+            stop_words_eng = set(stopwords.words('english'))
+        except Exception:
+            stop_words_eng = {
+                'a','about','above','after','again','against','all','am','an','and','any','are','as','at','be','because','been','before','being',
+                'below','between','both','but','by','can','cannot','could','did','do','does','doing','down','during','each','few','for','from','further',
+                'had','has','have','having','he','her','here','hers','herself','him','himself','his','how','i','if','in','into','is','it','its','itself',
+                'just','me','more','most','my','myself','no','nor','not','now','of','off','on','once','only','or','other','our','ours','ourselves','out',
+                'over','own','s','same','she','should','so','some','such','than','that','the','their','theirs','them','themselves','then','there','these',
+                'they','this','those','through','to','too','under','until','up','very','was','we','were','what','when','where','which','while','who','whom',
+                'why','with','would','you','your','yours','yourself','yourselves'
+            }
+
+    # Kamus Stopwords Bahasa Indonesia & Slang Words yang lebih kuat
+    stop_words_indo = {
+        'yg', 'di', 'ke', 'dari', 'ini', 'itu', 'dan', 'atau', 'tapi', 'yang', 'buat', 'sama', 'kok', 'sih', 'nya', 'aja', 'kalo', 
+        'udah', 'gak', 'ga', 'ada', 'untuk', 'dengan', 'dalam', 'pada', 'juga', 'sudah', 'saya', 'dia', 'mereka', 'kita', 'kami',
+        'kamu', 'aku', 'bisa', 'tidak', 'ya', 'yaudah', 'saja', 'belum', 'kalau', 'jadi', 'lagi', 'terus', 'biar', 'pas', 'kan',
+        'lebih', 'paling', 'baru', 'sekarang', 'banyak', 'sangat', 'sekali', 'memang', 'pasti', 'karena', 'seperti', 'apa', 'siapa',
+        'bagaimana', 'kenapa', 'kapan', 'dimana', 'mana', 'dong', 'deh', 'lah', 'pun', 'gini', 'gitu', 'begini', 'begitu', 'itu', 'ini',
+        'aja', 'saja', 'mah', 'nah', 'loh', 'nih', 'tuh', 'eh', 'oh', 'ah', 'ih', 'uh', 'bgt', 'banget', 'gw', 'gua', 'lu', 'lo', 'emang',
+        'dgn', 'klo', 'karna', 'krn', 'jd', 'jgn', 'jangan', 'bkn', 'bukan', 'bs', 'tp', 'dpt', 'dapet', 'org', 'orang', 'gk', 'tetap'
+    }
+    context_noise = {'video', 'youtube', 'apple', 'macbook', 'neo', 'laptop', 'david', 'gadgetin', 'bang', 'review', 'hp', 'handphone', 'smartphone', 'samsung', 'iphone', 'android', 'nya'}
+    all_stopwords = stop_words_eng.union(stop_words_indo).union(context_noise)
+    return indobert, all_stopwords
+
+def get_video_id(url):
+    """Extract YouTube Video ID from URL"""
+    match = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11}).*", url)
+    return match.group(1) if match else None
+
+def scrape_youtube_comments(video_id, max_comments=100):
+    """Scrape comments from YouTube API"""
+    if not YOUTUBE_API_KEY:
+        st.error("YOUTUBE_API_KEY tidak ditemukan di file .env!")
+        return []
+        
+    youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
+    comments = []
+    try:
+        request = youtube.commentThreads().list(part="snippet", videoId=video_id, maxResults=100, textFormat="plainText")
+        while request and len(comments) < max_comments:
+            response = request.execute()
+            for item in response['items']:
+                snippet = item['snippet']['topLevelComment']['snippet']
+                comments.append({
+                    'time': snippet['publishedAt'],
+                    'author': snippet['authorDisplayName'],
+                    'message': snippet['textDisplay']
+                })
+            if 'nextPageToken' in response:
+                request = youtube.commentThreads().list(part="snippet", videoId=video_id, maxResults=100, textFormat="plainText", pageToken=response['nextPageToken'])
+            else:
+                break
+        return comments
+    except Exception as e:
+        st.error(f"Error Scraping: {e}")
+        return []
+
+def clean_text(text, stopwords_set):
+    """Preprocess text using NLP Recipes"""
+    if not isinstance(text, str): return ""
+    text = emoji.demojize(text, delimiters=(" ", " "))
+    text = text.lower()
+    text = re.sub(r'http\S+|www\S+|\@\w+|\#', '', text)
+    text = re.sub(r'[^a-z\s\_]', ' ', text)
+    tokens = text.split()
+    return " ".join([w for w in tokens if w not in stopwords_set and len(w) > 2])
+
+def classify_sentiment(raw_text, model, stopwords_set):
+    """Predict sentiment using IndoBERT"""
+    cleaned_text = clean_text(raw_text, stopwords_set)
+    try:
+        result = model(cleaned_text[:512])[0]
+        if result['label'] == "LABEL_0": return "Positive"
+        elif result['label'] == "LABEL_1": return "Neutral"
+        else: return "Negative"
+    except Exception:
+        return "Neutral"
+
+def generate_extractive_summary(df, all_stopwords):
+    """Alternative Local NLP Summarization using Term Frequency - Digunakan jika Gemini API Limit 429"""
+    pos_df = df[df['sentiment'] == 'Positive']
+    neg_df = df[df['sentiment'] == 'Negative']
+    
+    # Ekstraksi Frekuensi Kata Kunci Positif
+    pos_words = []
+    for msg in pos_df['message']:
+        if isinstance(msg, str):
+            words = [w.strip('.,!?;:()[]"\'') for w in msg.lower().split() if len(w) > 2 and w not in all_stopwords]
+            pos_words.extend(words)
+            
+    # Ekstraksi Frekuensi Kata Kunci Negatif
+    neg_words = []
+    for msg in neg_df['message']:
+        if isinstance(msg, str):
+            words = [w.strip('.,!?;:()[]"\'') for w in msg.lower().split() if len(w) > 2 and w not in all_stopwords]
+            neg_words.extend(words)
+            
+    top_pos = [w[0] for w in Counter(pos_words).most_common(7)] if pos_words else ["(data positif tidak cukup)"]
+    top_neg = [w[0] for w in Counter(neg_words).most_common(7)] if neg_words else ["(data negatif tidak cukup)"]
+    
+    dominant = df['sentiment'].mode()[0].upper() if not df.empty else "NETRAL"
+    
+    fallback_msg = f"""
+⚠️ **Pemberitahuan Sistem (Auto-Fallback NLP):** *Kuota API Gemini Anda saat ini sedang mencapai limit (Error 429). Untuk memastikan dashboard tetap berjalan, sistem telah otomatis beralih menggunakan **Algoritma NLP Ekstraktif (Term Frequency) Lokal** berdasarkan data komentar yang baru saja disedot:*
+
+1. **Apa yang Paling Disukai (Demands):**
+Berdasarkan **{len(pos_df)} komentar positif** yang dianalisis, topik dan kata kunci yang paling banyak dibicarakan audiens dengan antusias adalah seputar: **{', '.join(top_pos).upper()}**. Fitur dan aspek tersebut terbukti paling disukai.
+
+2. **Apa yang Dikeluhkan (Pain Points):**
+Dari **{len(neg_df)} komentar negatif** yang dikumpulkan, mayoritas keluhan dan rasa skeptis audiens sangat mengerucut pada kata kunci: **{', '.join(top_neg).upper()}**. Kata-kata ini secara konsisten muncul dan menjadi faktor utama pemicu sentimen negatif di kolom komentar.
+
+3. **Kesimpulan Akhir:**
+Secara keseluruhan, sentimen audiens saat ini didominasi oleh respons **{dominant}**. Anda dapat menjadikan daftar *pain points* di atas sebagai bahan evaluasi utama untuk perbaikan produk/konten selanjutnya.
+"""
+    return fallback_msg
+
+
 # ========== DASHBOARD PAGES ==========
+
 def show_dashboard_page():
     """Main dashboard with churn and NLP overview."""
     st.title("🚀 LAPISAi - Advanced Analytics Dashboard")
@@ -380,7 +541,7 @@ def show_churn_prediction_page():
             
             # Customer info banner
             st.markdown(f"""
-            <div style='background-color: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 20px;'>
+            <div style='background-color: #1e1e1e; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #333;'>
                 <b>Customer ID:</b> {form_data['customer_id']} | 
                 <b>Plan:</b> {form_data['plan_type']} | 
                 <b>Actual Status:</b> {form_data['actual_status_text']}
@@ -933,253 +1094,364 @@ def show_churn_prediction_page():
         - High F1-Score (overall good performance)
         """)
 
-
+# ========== NLP ANALYSIS PAGE (LIVE SCRAPER) ==========
 def show_nlp_analysis_page():
-    """NLP Sentiment Analysis page with AI Executive Summary and detailed analytics."""
-    st.title("💬 NLP Sentiment Analysis")
+    """NLP Sentiment Analysis page with Live Scraper & AI Executive Summary."""
+    st.title("💬 NLP Sentiment Analysis (Live Scraper)")
     
-    chat_df = load_chat_data()
+    indobert_model, all_stopwords = load_nlp_pipeline()
     
-    if chat_df is None:
-        st.error("❌ Chat data not found. Expected: youtube_chat_5_menit_cleaned.csv")
-        return
-    
-    # ===== AI EXECUTIVE SUMMARY =====
-    st.subheader("🤖 AI Executive Summary")
-    
-    with st.expander("ℹ️ Apa itu Sentiment Analysis?"):
-        st.markdown("""
-        **Sentiment Analysis** adalah proses menganalisis teks customer feedback untuk menentukan apakah opinion mereka:
-        - **Positive** - Satisfied, appreciative, senang dengan service
-        - **Neutral** - Factual, objective, tidak ada emosi kuat
-        - **Negative** - Dissatisfied, critical, ada keluhan/masalah
-        
-        **Mengapa Penting?**
-        - Understand customer emotions dan satisfaction levels
-        - Identify areas untuk improvement
-        - Spot issues sebelum menjadi churn
-        """)
-    
-    summary_col1, summary_col2 = st.columns([2, 1])
-    
-    with summary_col1:
-        # Calculate summary stats
-        total_feedback = len(chat_df)
-        sentiment_counts = chat_df['sentiment'].value_counts()
-        
-        # Build summary text
-        neutral_pct = (sentiment_counts.get('Neutral', 0) / total_feedback * 100) if total_feedback > 0 else 0
-        positive_pct = (sentiment_counts.get('Positive', 0) / total_feedback * 100) if total_feedback > 0 else 0
-        negative_pct = (sentiment_counts.get('Negative', 0) / total_feedback * 100) if total_feedback > 0 else 0
-        
-        summary_text = f"""
-**Total Feedback Analyzed:** {total_feedback:,} messages
+    # Initialize session state for NLP
+    if 'chat_df' not in st.session_state:
+        st.session_state.chat_df = None
+        st.session_state.gemini_summary = None
 
-**Sentiment Breakdown:**
-- **Neutral ({neutral_pct:.1f}%)** - Objective, factual feedback
-- **Positive ({positive_pct:.1f}%)** - Satisfied, appreciative feedback  
-- **Negative ({negative_pct:.1f}%)** - Dissatisfied, critical feedback
+    # ===== SCRAPER INPUT SECTION =====
+    st.markdown("Masukkan URL Video YouTube untuk mengekstrak dan menganalisis komentar secara *real-time*.")
+    
+    col_url, col_qty = st.columns([3, 1])
+    with col_url:
+        youtube_url = st.text_input("🔗 URL YouTube:", value="https://www.youtube.com/watch?v=MBRtCiE7-v8")
+    with col_qty:
+        max_data = st.selectbox("Max Komentar:", [50, 100, 200, 500], index=1)
+        
+    if st.button("🚀 Mulai Scraping & Analisis", type="primary"):
+        video_id = get_video_id(youtube_url)
+        if not video_id:
+            st.error("URL YouTube tidak valid!")
+        else:
+            with st.status("Memproses Pipeline NLP...", expanded=True) as status:
+                st.write("1. Menyedot komentar dari YouTube...")
+                raw_comments = scrape_youtube_comments(video_id, max_data)
+                
+                if raw_comments:
+                    st.write(f"✅ {len(raw_comments)} komentar berhasil diambil.")
+                    st.write("2. Menganalisis sentimen menggunakan IndoBERT...")
+                    
+                    hasil_analisis = []
+                    my_bar = st.progress(0)
+                    for i, c in enumerate(raw_comments):
+                        sentiment = classify_sentiment(c['message'], indobert_model, all_stopwords)
+                        c['sentiment'] = sentiment
+                        hasil_analisis.append(c)
+                        my_bar.progress((i + 1) / len(raw_comments))
+                    
+                    df_hasil = pd.DataFrame(hasil_analisis)
+                    st.session_state.chat_df = df_hasil
+                    
+                    st.write("3. Menghasilkan Executive Summary dengan Gemini AI...")
+                    if gemini_ready:
+                        max_retries = 3
+                        retry_delay = 10  # 10 detik jeda
+                        
+                        for attempt in range(max_retries):
+                            try:
+                                # Membatasi token prompt agar tidak memberatkan limit Gemini
+                                pos_samples = df_hasil[df_hasil['sentiment'] == 'Positive']['message'].dropna().head(10).apply(lambda x: str(x)[:150]).tolist()
+                                neg_samples = df_hasil[df_hasil['sentiment'] == 'Negative']['message'].dropna().head(10).apply(lambda x: str(x)[:150]).tolist()
+                                
+                                prompt = f"""
+                                Kamu adalah seorang Senior Data Analyst. Saya baru saja melakukan analisis sentimen menggunakan IndoBERT pada komentar YouTube.
+                                Positif: {len(pos_samples)} sampel, Negatif: {len(neg_samples)} sampel.
+                                
+                                Sampel Positif: {pos_samples}
+                                Sampel Negatif: {neg_samples}
 
-**Key Insights:**
-The audience sentiment is dominated by {sentiment_counts.idxmax() if len(sentiment_counts) > 0 else 'Neutral'} feedback, 
-indicating {"strong engagement and satisfaction" if positive_pct > 40 else "mixed reception" if positive_pct > 20 else "areas needing improvement"}.
-"""
-        st.markdown(summary_text)
+                                Buatkan Executive Summary yang sangat profesional dalam bahasa Indonesia. 
+                                Format WAJIB:
+                                1. **Apa yang Paling Disukai (Demands):**
+                                2. **Apa yang Dikeluhkan (Pain Points):**
+                                3. **Kesimpulan Akhir:**
+                                """
+                                model_instance = genai.GenerativeModel(GEMINI_MODEL_NAME)
+                                response = model_instance.generate_content(prompt)
+                                st.session_state.gemini_summary = response.text
+                                break  # Berhasil, keluar dari loop retry
+                                
+                            except Exception as e:
+                                error_msg = str(e)
+                                if "429" in error_msg or "Quota" in error_msg:
+                                    if attempt < max_retries - 1:
+                                        st.warning(f"⚠️ Gemini API sibuk (Limit 429). Otomatis mencoba ulang dalam {retry_delay} detik... (Percobaan {attempt + 1}/{max_retries})")
+                                        time.sleep(retry_delay)
+                                        retry_delay *= 2  # Exponential backoff (10s -> 20s)
+                                    else:
+                                        # Jika 3x dicoba masih limit, pakai algoritma lokal (tanpa teks palsu!)
+                                        st.session_state.gemini_summary = generate_extractive_summary(df_hasil, all_stopwords)
+                                else:
+                                    st.session_state.gemini_summary = f"Gagal memanggil Gemini AI: {e}"
+                                    break
+                    else:
+                        st.session_state.gemini_summary = "Gemini API Key tidak ditemukan di file .env."
+                        
+                    status.update(label="Selesai!", state="complete", expanded=False)
+                else:
+                    status.update(label="Gagal mengambil data.", state="error")
+
+    # ===== DASHBOARD RENDER (Hanya tampil jika ada data di session_state) =====
+    chat_df = st.session_state.chat_df
+    
+    if chat_df is not None:
+        st.divider()
         
-        # Raw voice quotes
-        st.markdown("**📝 Sample Feedback (Raw Quotes):**")
-        sample_messages = chat_df['message'].head(3).tolist()
-        for i, msg in enumerate(sample_messages, 1):
-            st.caption(f"_{i}. {msg}_")
-    
-    with summary_col2:
-        # Total feedback stat
-        st.metric("📊 Total Feedback", total_feedback)
-        st.metric("👥 Unique Authors", chat_df['author'].nunique())
-        st.metric("⏱️ Duration", f"{chat_df['elapsed'].nunique()} time slots")
-    
-    st.divider()
-    
-    # ===== EMOTION DISTRIBUTION ANALYSIS =====
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("😊 Emotion Distribution Analysis")
-        sentiment_counts = chat_df['sentiment'].value_counts()
+        # ===== AI EXECUTIVE SUMMARY =====
+        st.subheader("🤖 AI Executive Summary")
         
-        color_map = {
-            'Positive': '#2ecc71',
-            'Neutral': '#95a5a6',
-            'Negative': '#e74c3c'
-        }
-        colors = [color_map.get(s, '#95a5a6') for s in sentiment_counts.index]
+        with st.expander("ℹ️ Apa itu Sentiment Analysis?"):
+            st.markdown("""
+            **Sentiment Analysis** adalah proses menganalisis teks customer feedback untuk menentukan apakah opinion mereka:
+            - **Positive** - Satisfied, appreciative, senang dengan service
+            - **Neutral** - Factual, objective, tidak ada emosi kuat
+            - **Negative** - Dissatisfied, critical, ada keluhan/masalah
+            
+            **Mengapa Penting?**
+            - Understand customer emotions dan satisfaction levels
+            - Identify areas untuk improvement
+            - Spot issues sebelum menjadi churn
+            """)
         
-        fig = go.Figure(data=[
-            go.Bar(
-                y=sentiment_counts.index,
-                x=sentiment_counts.values,
-                orientation='h',
-                marker=dict(color=colors),
-                text=sentiment_counts.values,
-                textposition='auto',
-            )
-        ])
-        fig.update_layout(
-            title="Sentiment Distribution",
-            xaxis_title="Count",
-            yaxis_title="Sentiment",
-            height=300,
-            showlegend=False
-        )
-        st.plotly_chart(fig, use_container_width=True)
-        st.caption("**Cara membaca:** Bar lebih panjang = lebih banyak messages dengan sentiment itu. Lihat mana yang dominates (paling panjang).")
-    
-    with col2:
-        st.subheader("📈 Total Feedback Analyzed")
+        summary_col1, summary_col2 = st.columns([2, 1])
         
-        # Pie chart
-        fig = px.pie(
-            values=sentiment_counts.values,
-            names=sentiment_counts.index,
-            title="Sentiment Proportion",
-            color_discrete_map=color_map,
-            hole=0.4
-        )
-        st.plotly_chart(fig, use_container_width=True)
-        st.caption("**Cara membaca:** Slice lebih besar = lebih besar proporsi dari sentiment itu. Ideal: 60%+ positive atau neutral.")
-    
-    st.divider()
-    
-    # ===== SENTIMENT & KEYWORD ANALYSIS =====
-    st.subheader("🔑 Sentiment & Keyword Analysis")
-    
-    # Extract keywords (words) from messages
-    all_words = []
-    for msg in chat_df['message']:
-        if isinstance(msg, str):
-            words = msg.lower().split()
-            all_words.extend([w.strip('.,!?;:') for w in words if len(w) > 2])
-    
-    word_freq = Counter(all_words).most_common(15)
-    keyword_data = pd.DataFrame(word_freq, columns=['Keyword', 'Frequency'])
-    
-    # Map sentiment to top keywords
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("**Top Keywords by Frequency**")
-        
-        fig = px.bar(
-            keyword_data.head(10),
-            x='Frequency',
-            y='Keyword',
-            orientation='h',
-            title="Most Mentioned Keywords",
-            color='Frequency',
-            color_continuous_scale='Viridis'
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with col2:
-        st.markdown("**Sentiment Distribution by Message Length**")
-        chat_df['msg_length'] = chat_df['message'].str.len()
-        
-        fig = px.scatter(
-            chat_df,
-            x='msg_length',
-            y='sentiment',
-            color='sentiment',
-            title="Message Length vs Sentiment",
-            color_discrete_map=color_map,
-            labels={'msg_length': 'Message Length (chars)', 'sentiment': 'Sentiment'}
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    
-    st.divider()
-    
-    # ===== SENTIMENT TREND & DRIFT =====
-    st.subheader("📊 Sentiment Trend & Drift")
-    
-    # Create time-based sentiment trend
-    chat_df['time'] = pd.to_datetime(chat_df['time'], errors='coerce')
-    chat_df = chat_df.sort_values('time')
-    
-    # Group by time and sentiment
-    sentiment_trend = chat_df.groupby([pd.Grouper(key='time', freq='5min'), 'sentiment']).size().reset_index(name='count')
-    
-    fig = px.line(
-        sentiment_trend,
-        x='time',
-        y='count',
-        color='sentiment',
-        title="Sentiment Trend Over Time",
-        color_discrete_map=color_map,
-        labels={'time': 'Time', 'count': 'Message Count', 'sentiment': 'Sentiment'}
-    )
-    st.plotly_chart(fig, use_container_width=True)
-    st.caption("**Cara membaca:** Garis naik = lebih banyak messages. Lihat warna: merah (negative) = watch out, hijau (positive) = good!")
-    
-    with st.expander("ℹ️ Cara Membaca Sentiment Trend"):
-        st.markdown("""
-        **Apa yang dilihat?**
-        - Garis menunjukkan berapa banyak messages dengan setiap sentiment dalam time window 5 menit
-        
-        **Interpretasi:**
-        - Garis Negative naik → ada masalah/issue yang happening
-        - Garis Positive stabil/naik → audience engaged dan satisfied
-        - Garis Neutral tinggi → audience mostly observing, factual discussion
-        
-        **Action Points:**
-        - Jika Negative spike → investigate apa yang terjadi saat itu
-        - Jika Positive trend naik → content sedang resonating well
-        """)
-    
-    st.divider()
-    
-    # ===== RAW CUSTOMER FEEDBACK (LIVE NLP) =====
-    st.subheader("💭 Raw Customer Feedback (Live NLP)")
-    
-    # Filter options
-    col1, col2, col3 = st.columns([2, 2, 2])
-    
-    with col1:
-        filter_sentiment = st.multiselect(
-            "Filter by Sentiment",
-            chat_df['sentiment'].unique(),
-            default=chat_df['sentiment'].unique()
-        )
-    
-    with col2:
-        min_length = st.slider("Min Message Length", 0, 200, 0, step=10)
-    
-    with col3:
-        show_count = st.selectbox("Show", [10, 20, 50, 100], index=0)
-    
-    # Apply filters
-    filtered_df = chat_df[
-        (chat_df['sentiment'].isin(filter_sentiment)) &
-        (chat_df['message'].str.len() >= min_length)
-    ].copy()
-    
-    # Display feedback table
-    if len(filtered_df) > 0:
-        display_df = filtered_df[['time', 'author', 'message', 'sentiment']].head(show_count).copy()
-        display_df.columns = ['Time', 'Author', 'Message', 'Sentiment']
-        
-        # Color sentiment
-        def color_sentiment(val):
-            if val == 'Positive':
-                return '🟢 Positive'
-            elif val == 'Negative':
-                return '🔴 Negative'
+        with summary_col1:
+            if st.session_state.gemini_summary:
+                if "Algoritma NLP Ekstraktif Lokal" in st.session_state.gemini_summary:
+                    st.warning(st.session_state.gemini_summary)
+                else:
+                    st.info("💡 **Insights Berdasarkan Analisis Live Dataset:**")
+                    st.markdown(st.session_state.gemini_summary)
             else:
-                return '⚪ Neutral'
+                st.warning("Gagal memuat rangkuman Gemini. Silakan scraping ulang.")
+                
+            # Raw voice quotes
+            st.markdown("**📝 Sample Feedback (Raw Quotes):**")
+            sample_messages = chat_df['message'].head(3).tolist()
+            for i, msg in enumerate(sample_messages, 1):
+                st.caption(f"_{i}. {msg}_")
         
-        display_df['Sentiment'] = display_df['Sentiment'].apply(color_sentiment)
+        with summary_col2:
+            total_feedback = len(chat_df)
+            sentiment_counts = chat_df['sentiment'].value_counts()
+            
+            st.metric("📊 Total Feedback", total_feedback)
+            st.metric("👥 Unique Authors", chat_df['author'].nunique())
+            
+            # Waktu dari timestamp aslinya (bukan kolom elapsed yg lama)
+            chat_df['time'] = pd.to_datetime(chat_df['time'], errors='coerce')
+            unique_dates = chat_df['time'].dt.date.nunique()
+            st.metric("⏱️ Duration", f"{unique_dates} Days Span")
+            
+        st.divider()
         
-        st.dataframe(display_df, use_container_width=True)
-    else:
-        st.info("No messages match the selected filters.")
+        # ===== EMOTION DISTRIBUTION ANALYSIS =====
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("😊 Emotion Distribution Analysis")
+            
+            color_map = {
+                'Positive': '#2ecc71',
+                'Neutral': '#95a5a6',
+                'Negative': '#e74c3c'
+            }
+            colors = [color_map.get(s, '#95a5a6') for s in sentiment_counts.index]
+            
+            fig = go.Figure(data=[
+                go.Bar(
+                    y=sentiment_counts.index,
+                    x=sentiment_counts.values,
+                    orientation='h',
+                    marker=dict(color=colors),
+                    text=sentiment_counts.values,
+                    textposition='auto',
+                )
+            ])
+            fig.update_layout(
+                title="Sentiment Distribution",
+                xaxis_title="Count",
+                yaxis_title="Sentiment",
+                height=300,
+                showlegend=False
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            st.caption("**Cara membaca:** Bar lebih panjang = lebih banyak messages dengan sentiment itu. Lihat mana yang dominates (paling panjang).")
+        
+        with col2:
+            st.subheader("📈 Total Feedback Analyzed")
+            
+            # Pie chart
+            fig = px.pie(
+                values=sentiment_counts.values,
+                names=sentiment_counts.index,
+                title="Sentiment Proportion",
+                color_discrete_map=color_map,
+                hole=0.4
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            st.caption("**Cara membaca:** Slice lebih besar = lebih besar proporsi dari sentiment itu. Ideal: 60%+ positive atau neutral.")
+        
+        st.divider()
+        
+        # ===== SENTIMENT & KEYWORD ANALYSIS =====
+        st.subheader("🔑 Sentiment & Keyword Analysis")
+        
+        # Extract keywords (words) from messages
+        all_words = []
+        for msg in chat_df['message']:
+            if isinstance(msg, str):
+                words = msg.lower().split()
+                all_words.extend([w.strip('.,!?;:') for w in words if len(w) > 2 and w not in all_stopwords])
+        
+        word_freq = Counter(all_words).most_common(15)
+        keyword_data = pd.DataFrame(word_freq, columns=['Keyword', 'Frequency'])
+        
+        # Map sentiment to top keywords
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**Top Keywords by Frequency**")
+            
+            fig = px.bar(
+                keyword_data.head(10),
+                x='Frequency',
+                y='Keyword',
+                orientation='h',
+                title="Most Mentioned Keywords",
+                color='Frequency',
+                color_continuous_scale='Viridis'
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            st.markdown("**Sentiment Distribution by Message Length**")
+            chat_df['msg_length'] = chat_df['message'].str.len()
+            
+            fig = px.scatter(
+                chat_df,
+                x='msg_length',
+                y='sentiment',
+                color='sentiment',
+                title="Message Length vs Sentiment",
+                color_discrete_map=color_map,
+                labels={'msg_length': 'Message Length (chars)', 'sentiment': 'Sentiment'}
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        
+        st.divider()
+        
+        # ===== SENTIMENT TREND & DRIFT =====
+        st.subheader("📊 Sentiment Trend & Drift")
+        
+        # Create time-based sentiment trend
+        chat_df = chat_df.sort_values('time')
+        
+        # Menggunakan window 1 Jam atau 1 Hari (Live YouTube range besar)
+        sentiment_trend = chat_df.groupby([pd.Grouper(key='time', freq='1h'), 'sentiment']).size().reset_index(name='count')
+        
+        fig = px.line(
+            sentiment_trend,
+            x='time',
+            y='count',
+            color='sentiment',
+            title="Sentiment Trend Over Time",
+            color_discrete_map=color_map,
+            labels={'time': 'Time', 'count': 'Message Count', 'sentiment': 'Sentiment'}
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        st.caption("**Cara membaca:** Garis naik = lebih banyak messages. Lihat warna: merah (negative) = watch out, hijau (positive) = good!")
+        
+        with st.expander("ℹ️ Cara Membaca Sentiment Trend"):
+            st.markdown("""
+            **Apa yang dilihat?**
+            - Garis menunjukkan berapa banyak messages dengan setiap sentiment dalam time window tertentu.
+            
+            **Interpretasi:**
+            - Garis Negative naik → ada masalah/issue yang happening
+            - Garis Positive stabil/naik → audience engaged dan satisfied
+            - Garis Neutral tinggi → audience mostly observing, factual discussion
+            
+            **Action Points:**
+            - Jika Negative spike → investigate apa yang terjadi saat itu
+            - Jika Positive trend naik → content sedang resonating well
+            """)
+        
+        st.divider()
+        
+        # ===== RAW CUSTOMER FEEDBACK (LIVE NLP) =====
+        st.subheader("💭 Raw Customer Feedback (Live NLP)")
+        
+        # Filter options
+        col1, col2, col3 = st.columns([2, 2, 2])
+        
+        with col1:
+            filter_sentiment = st.multiselect(
+                "Filter by Sentiment",
+                chat_df['sentiment'].unique(),
+                default=chat_df['sentiment'].unique()
+            )
+        
+        with col2:
+            min_length = st.slider("Min Message Length", 0, 200, 0, step=10)
+        
+        with col3:
+            show_count = st.selectbox("Show", [10, 20, 50, 100], index=0)
+        
+        # Apply filters
+        filtered_df = chat_df[
+            (chat_df['sentiment'].isin(filter_sentiment)) &
+            (chat_df['message'].str.len() >= min_length)
+        ].copy()
+        
+        # Display feedback table
+        if len(filtered_df) > 0:
+            display_df = filtered_df[['time', 'author', 'message', 'sentiment']].head(show_count).copy()
+            display_df.columns = ['Time', 'Author', 'Message', 'Sentiment']
+            
+            # Color sentiment
+            def color_sentiment(val):
+                if val == 'Positive':
+                    return '🟢 Positive'
+                elif val == 'Negative':
+                    return '🔴 Negative'
+                else:
+                    return '⚪ Neutral'
+            
+            display_df['Sentiment'] = display_df['Sentiment'].apply(color_sentiment)
+            
+            st.dataframe(display_df, use_container_width=True)
+        else:
+            st.info("No messages match the selected filters.")
+
+    # =========================================================================
+    # FITUR BARU: UJI SENTIMEN MANUAL (Di paling bawah halaman NLP Analysis)
+    # =========================================================================
+    st.divider()
+    st.subheader("🧪 Uji Sentimen Manual")
+    st.markdown("Ketikkan sebuah kalimat di bawah ini untuk melihat bagaimana model **IndoBERT** mengklasifikasikan sentimennya secara instan.")
+    
+    manual_input = st.text_area("Masukkan teks opini/komentar:", placeholder="Contoh: Saya sangat kecewa karena fiturnya sering mengalami error saat dipakai.")
+    
+    if st.button("🔍 Analisis Sentimen Teks", key="manual_nlp_btn"):
+        if manual_input.strip() == "":
+            st.warning("Teks tidak boleh kosong.")
+        else:
+            with st.spinner("Mengklasifikasi teks..."):
+                sentiment_result = classify_sentiment(manual_input, indobert_model, all_stopwords)
+                
+                if sentiment_result == 'Positive':
+                    st.success(f"### 🟢 Hasil: POSITIVE")
+                    st.markdown("Kalimat ini terdeteksi memiliki sentimen yang **baik / positif**.")
+                elif sentiment_result == 'Negative':
+                    st.error(f"### 🔴 Hasil: NEGATIVE")
+                    st.markdown("Kalimat ini terdeteksi memiliki sentimen yang **buruk / negatif**.")
+                else:
+                    st.info(f"### ⚪ Hasil: NEUTRAL")
+                    st.markdown("Kalimat ini terdeteksi memiliki sentimen yang **netral / objektif** (tidak ada emosi dominan).")
+                
+                # Opsi untuk melihat proses di balik layar
+                with st.expander("Lihat Teks Setelah Pre-processing (NLP Recipes)"):
+                    cleaned = clean_text(manual_input, all_stopwords)
+                    st.code(cleaned)
+                    st.caption("*(Emoji dikonversi menjadi teks, stopword dan karakter khusus telah dibuang agar model bisa membaca lebih akurat)*")
 
 def show_about_page():
     """About and documentation page."""
@@ -1191,14 +1463,14 @@ def show_about_page():
     **Features:**
     - 🤖 **Customer Churn Prediction** - XGBoost + CatBoost ensemble models
     - 📊 **Per-Plan Analysis** - Starter, Professional, Enterprise
-    - 💬 **NLP Sentiment Analysis** - YouTube chat sentiment tracking & trend analysis
+    - 💬 **NLP Sentiment Analysis** - Live YouTube Scraper + IndoBERT + Gemini 2.0 Flash
     - 📈 **Real-time Metrics** - ROC-AUC, F1-Score, Accuracy
     
     **Architecture:**
     1. **Feature Engineering** - 86 engineered features from raw data
     2. **Model Training** - Separate models per customer plan
     3. **Ensemble Predictions** - 60% XGBoost + 40% CatBoost
-    4. **NLP Processing** - Sentiment analysis on customer feedback
+    4. **NLP Processing** - Real-Time Scraper and Transformer Classification
     
     **Data Pipeline:**
     - Step 1: Feature engineering → `engineered_features/`
@@ -1237,12 +1509,12 @@ def main():
         "Predictions": ENSEMBLE_PREDICTIONS_PATH.exists(),
         "Metrics": EVALUATION_METRICS_PATH.exists(),
         "Models": TRAINED_MODELS_DIR.exists(),
-        "Chat": CHAT_DATA_PATH.exists(),
+        "Chat": True, # Changed to True since it's dynamic scraping now
     }
     
     for label, exists in checks.items():
-        emoji = "✅" if exists else "❌"
-        st.sidebar.write(f"{emoji} {label}")
+        emji = "✅" if exists else "❌"
+        st.sidebar.write(f"{emji} {label}")
     
     # Route to page
     if page == "💼 Churn Prediction":
@@ -1254,4 +1526,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
