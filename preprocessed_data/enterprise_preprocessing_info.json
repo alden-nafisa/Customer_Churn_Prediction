@@ -1,7 +1,7 @@
 {
   "plan_type": "Enterprise",
   "features_selected": "['days_since_last_login', 'avg_monthly_usage_hours', 'payment_delay_days_mean', 'critical_ticket_ratio', 'avg_nps_score', 'revenue_at_risk', 'payment_consistency_score', 'unresolved_ratio', 'total_tickets', 'mrr_current', 'tenure_days', 'usage_per_user', 'feature_adoption_pct_mean', 'total_users', 'enterprise_account_health']",
-  "feature_groups": "{'tier_1': ['days_since_last_login', 'avg_monthly_usage_hours', 'payment_delay_days_mean', 'dunning_event_count', 'critical_ticket_ratio', 'avg_nps_score'], 'tier_2': ['revenue_at_risk', 'payment_consistency_score', 'unresolved_ratio', 'total_tickets', 'mrr_current', 'tenure_days'], 'tier_3': ['usage_per_user', 'feature_adoption_pct_mean', 'nps_trend', 'total_users'], 'interaction': ['enterprise_account_health', 'enterprise_strategic_risk']}",
+  "feature_groups": "{'tier_1': ['days_since_last_login', 'avg_monthly_usage_hours', 'payment_delay_days_mean', 'dunning_event_count', 'critical_ticket_ratio', 'avg_nps_score'], 'tier_2': ['revenue_at_risk', 'payment_consistency_score', 'unresolved_ratio', 'total_tickets', 'mrr_current', 'tenure_days'], 'tier_3': ['usage_per_user', 'feature_adoption_pct_mean', 'nps_trend', 'total_users'], 'interaction': ['enterprise_strategic_risk', 'enterprise_account_health']}",
   "class_weights": "{0: 1.0, 1: 5.285714285714286}",
   "train_size": "554",
   "test_size": "238"

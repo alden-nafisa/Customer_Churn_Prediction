@@ -26,7 +26,7 @@ export default function SentimentView() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/sentiment/analysis');
+      const res = await fetch('/api/sentiment/analysis');
       if (!res.ok) {
         const errorData = await res.json();
         throw new Error(errorData.detail || 'Gagal mengambil data dari backend Python.');
@@ -44,7 +44,7 @@ export default function SentimentView() {
   };
 
   const handleExport = () => {
-    window.open('http://127.0.0.1:8000/api/sentiment/export', '_blank');
+    window.open('/api/sentiment/export', '_blank');
   };
 
   const handleManualTest = async () => {
@@ -52,7 +52,7 @@ export default function SentimentView() {
     setManualLoading(true);
     setManualResult(null);
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/sentiment/manual', {
+      const res = await fetch('/api/sentiment/manual', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: manualText }),

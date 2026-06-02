@@ -6,3 +6,10 @@ pydantic
 scikit-learn
 xgboost
 catboost
+python-dotenv
+emoji
+nltk
+torch
+google-generativeai
+transformers
+google-api-python-client

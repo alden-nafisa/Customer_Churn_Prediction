@@ -258,6 +258,17 @@ def classify_sentiment(raw_text: str, model, stopwords_set) -> str:
     except Exception:
         return "Neutral"
 
+def classify_sentiment_rule_based(raw_text: str) -> str:
+    text = clean_text(raw_text, set())
+    positive_hints = {'bagus', 'mantap', 'keren', 'suka', 'senang', 'terbaik', 'hebat', 'puas', 'helpful', 'mantul', 'gooo', 'asik'}
+    negative_hints = {'buruk', 'jelek', 'kecewa', 'lambat', 'parah', 'gagal', 'benci', 'marah', 'susah', 'ribet', 'spam', 'lemot'}
+    tokens = set(text.split())
+    if tokens & negative_hints:
+        return 'Negative'
+    if tokens & positive_hints:
+        return 'Positive'
+    return 'Neutral'
+
 EMOTION_KEYWORDS = {
     'Annoyance': ['marah', 'kesal', 'jengkel', 'annoy', 'ngambek', 'risih', 'benci', 'jelek', 'buruk', 'gagal', 'mahal', 'overpriced', 'scam', 'lemot', 'parah', 'males', 'nyebelin', 'kecewa', 'sampah'],
     'Excitement': ['senang', 'happy', 'excited', 'asik', 'mantap', 'hebat', 'wah', 'seru', 'bagus', 'keren', 'berguna', 'membantu', 'gokil', 'kece', 'suka', 'terbaik', 'top', 'wih', 'menyala'],
@@ -450,6 +461,122 @@ Format WAJIB (Maksimal 3 paragraf):
         'raw_feedback': raw_feedback,
         'trend_data': trend_data,
     }
+
+def create_sentiment_analysis_payload_fast(df: pd.DataFrame) -> Dict[str, Any]:
+    """Fast fallback sentiment payload that avoids loading large NLP models."""
+    df = df.copy()
+    df['message'] = df['message'].astype(str)
+
+    sentiments = []
+    emotions = []
+    for msg in df['message']:
+        sentiment = classify_sentiment_rule_based(msg)
+        emotion = infer_sentiment_emotion(msg, sentiment)
+        sentiments.append(sentiment)
+        emotions.append(emotion)
+
+    df['sentiment'] = sentiments
+    df['emotion'] = emotions
+
+    all_stopwords = set()
+    try:
+        all_stopwords.update(stopwords.words('english'))
+    except Exception:
+        pass
+    all_stopwords.update({
+        'yg', 'di', 'ke', 'dari', 'ini', 'itu', 'dan', 'atau', 'tapi', 'yang', 'buat', 'sama', 'kok', 'sih', 'nya', 'aja', 'kalo',
+        'udah', 'gak', 'ga', 'ada', 'untuk', 'dengan', 'dalam', 'pada', 'juga', 'sudah', 'saya', 'dia', 'mereka', 'kita', 'kami',
+        'kamu', 'aku', 'bisa', 'tidak', 'ya', 'yaudah', 'saja', 'belum', 'kalau', 'jadi', 'lagi', 'terus', 'biar', 'pas', 'kan',
+        'lebih', 'paling', 'baru', 'sekarang', 'banyak', 'sangat', 'sekali', 'memang', 'pasti', 'karena', 'seperti', 'apa', 'siapa',
+        'bagaimana', 'kenapa', 'kapan', 'dimana', 'mana', 'dong', 'deh', 'lah', 'pun', 'gini', 'gitu', 'begini', 'begitu',
+        'mah', 'nah', 'loh', 'nih', 'tuh', 'eh', 'oh', 'ah', 'ih', 'uh', 'bgt', 'banget', 'gw', 'gua', 'lu', 'lo', 'emang',
+        'dgn', 'klo', 'karna', 'krn', 'jd', 'jgn', 'jangan', 'bkn', 'bukan', 'bs', 'tp', 'dpt', 'dapet', 'org', 'orang', 'gk', 'tetap'
+    })
+
+    total = len(df)
+    positive = int((df['sentiment'] == 'Positive').sum())
+    negative = int((df['sentiment'] == 'Negative').sum())
+    neutral = int((df['sentiment'] == 'Neutral').sum())
+
+    sentiment_counts = {'positive': positive, 'negative': negative, 'neutral': neutral}
+    executive_summary = generate_extractive_summary(df, all_stopwords)
+
+    raw_feedback = []
+    for _, row in df.head(15).iterrows():
+        raw_feedback.append({
+            'time': str(row.get('time', '')),
+            'author': str(row.get('author', 'Unknown')),
+            'message': str(row.get('message', '')),
+            'sentiment': str(row.get('sentiment', 'Neutral')),
+            'emotion': str(row.get('emotion', 'Neutral')),
+        })
+
+    emotion_counts = Counter(df['emotion'])
+    emotion_distribution = []
+    for label in ['Neutral', 'Excitement', 'Annoyance', 'Sadness']:
+        emotion_distribution.append({'label': label, 'value': int(emotion_counts.get(label, 0))})
+
+    try:
+        trend_df = df.copy()
+        trend_df['time'] = pd.to_datetime(trend_df['time'], errors='coerce')
+        trend_df = trend_df.sort_values('time').reset_index(drop=True)
+        trend_df['chunk'] = pd.qcut(np.arange(len(trend_df)), q=10, labels=False, duplicates='drop')
+        grouped = trend_df.groupby(['chunk', 'sentiment']).size().unstack(fill_value=0).reset_index()
+        for col in ['Positive', 'Negative', 'Neutral']:
+            if col not in grouped.columns:
+                grouped[col] = 0
+        trend_data = []
+        for _, row in grouped.iterrows():
+            trend_data.append({
+                'time': f"Fase {int(row['chunk']) + 1}",
+                'Positive': int(row['Positive']),
+                'Negative': int(row['Negative']),
+                'Neutral': int(row['Neutral'])
+            })
+    except Exception:
+        trend_data = []
+
+    return {
+        'executive_summary': executive_summary,
+        'total_feedback': total,
+        'sentiment_distribution': sentiment_counts,
+        'emotion_distribution': emotion_distribution,
+        'keywords': build_sentiment_keywords(df['message'], all_stopwords, top_n=7),
+        'raw_feedback': raw_feedback,
+        'trend_data': trend_data,
+    }
+
+def load_local_sentiment_source(max_rows: int = 2000) -> pd.DataFrame:
+    """Load a local sentiment dataset as a fallback when YouTube scraping is unavailable."""
+    candidate_paths = [
+        CHAT_DATA_PATH,
+        PROJECT_ROOT / "artifacts" / "nlp" / "gadgetin_2000_comments_analyzed.csv",
+    ]
+
+    for path in candidate_paths:
+        if not path.exists():
+            continue
+
+        df = pd.read_csv(path).copy()
+        if "message" not in df.columns:
+            if "text" in df.columns:
+                df = df.rename(columns={"text": "message"})
+            else:
+                continue
+
+        if "time" not in df.columns:
+            df["time"] = pd.Timestamp.now().isoformat()
+        if "author" not in df.columns:
+            df["author"] = "LocalCache"
+
+        return df.loc[:, [c for c in ["time", "author", "message"] if c in df.columns]].head(max_rows)
+
+    fallback_rows = [
+        {"time": "2026-01-01 10:00:00", "author": "@sample1", "message": "Bagus banget, informatif dan jelas."},
+        {"time": "2026-01-01 10:00:01", "author": "@sample2", "message": "Kurang cepat, agak membosankan."},
+        {"time": "2026-01-01 10:00:02", "author": "@sample3", "message": "Mantap, sangat membantu!"},
+    ]
+    return pd.DataFrame(fallback_rows)
 
 # ==============================================================================
 # ============================== CHURN FUNCTIONS ===============================
@@ -760,20 +887,24 @@ def api_predict_churn(payload: PredictRequest) -> Dict[str, Any]:
 @app.get("/api/sentiment/analysis")
 def api_sentiment_analysis() -> Dict[str, Any]:
     try:
-        # HARDCODED: GadgetIn "Macbook Neo" video dan Target 2000 Komentar
-        video_id = "MBRtCiE7-v8"
-        max_comments = 2000
-        
-        raw_comments = scrape_youtube_comments(video_id, max_comments)
-        if not raw_comments:
-            raise HTTPException(status_code=400, detail="Gagal mengambil komentar dari YouTube.")
-            
-        df = pd.DataFrame(raw_comments)
-        
-        # Proses Data: IndoBERT & Gemini AI Summarization
-        payload = create_sentiment_analysis_payload(df)
-        
-        return payload
+        # Jika API key tidak tersedia, gunakan dataset lokal sebagai fallback.
+        if YOUTUBE_API_KEY:
+            video_id = "MBRtCiE7-v8"
+            max_comments = 2000
+            raw_comments = scrape_youtube_comments(video_id, max_comments)
+            if not raw_comments:
+                raise HTTPException(status_code=400, detail="Gagal mengambil komentar dari YouTube.")
+            df = pd.DataFrame(raw_comments)
+            payload = create_sentiment_analysis_payload(df)
+            payload["data_source"] = "youtube_api"
+            return payload
+        else:
+            df = load_local_sentiment_source(max_rows=2000)
+            if df.empty:
+                raise HTTPException(status_code=400, detail="Tidak ada data sentimen lokal yang tersedia.")
+            payload = create_sentiment_analysis_payload_fast(df)
+            payload["data_source"] = "local_fallback"
+            return payload
         
     except HTTPException as http_exc:
         raise http_exc
