@@ -1,6 +1,8 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Target, ChevronDown, Minus, Plus, Activity, AlertTriangle } from 'lucide-react'
 import { customersByPlan, featureDominance } from './MockData.jsx'
+
+const API_BASE_URL = 'http://localhost:8000'
 
 export default function PredictionView() {
   const [predictionTab, setPredictionTab] = useState('individual')
@@ -9,21 +11,55 @@ export default function PredictionView() {
   const [selectedModel, setSelectedModel] = useState('Ensemble')
   const [fetchState, setFetchState] = useState('idle')
   const [predictState, setPredictState] = useState('idle')
+  const [error, setError] = useState('')
+  const [predictionResult, setPredictionResult] = useState(null)
+  const [churnAnalysis, setChurnAnalysis] = useState(null)
   const [formData, setFormData] = useState({
     paymentDelay: '', featureAdoption: '', supportTickets: '', lastLogin: '', annualValue: '',
     healthScore: '', npsScore: '', usageHours: '', threshold: '0.5'
   })
   const [planTypeB, setPlanTypeB] = useState('Enterprise')
+  const [availableCustomers, setAvailableCustomers] = useState([])
+
+  useEffect(() => {
+    const fetchCustomers = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/customers?plan_type=${planTypeA}`)
+        if (!response.ok) throw new Error('Failed to fetch customers')
+        const data = await response.json()
+        const customerIds = data.customers.map(c => c.customer_id)
+        setAvailableCustomers(customerIds)
+      } catch (err) {
+        console.error('Error fetching customers:', err)
+        setError('Could not load customers from server')
+      }
+    }
+    fetchCustomers()
+  }, [planTypeA])
+
+  useEffect(() => {
+    const fetchChurnAnalysis = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/churn/analysis?plan_type=${planTypeA}`)
+        if (!response.ok) throw new Error('Failed to fetch analysis')
+        const data = await response.json()
+        setChurnAnalysis(data)
+      } catch (err) {
+        console.error('Error fetching churn analysis:', err)
+      }
+    }
+    fetchChurnAnalysis()
+  }, [planTypeA])
 
   const formFields = [
-    { key: 'paymentDelay', label: 'Payment Delay Days', step: 1 },
-    { key: 'featureAdoption', label: 'Feature Adoption %', step: 5 },
-    { key: 'supportTickets', label: 'Support Tickets (90d)', step: 1 },
-    { key: 'lastLogin', label: 'Day Since Last Login', step: 1 },
-    { key: 'annualValue', label: 'Annual Value ($)', step: 500 },
-    { key: 'healthScore', label: 'Payment Health Score', step: 5 },
-    { key: 'npsScore', label: 'Avg NPS Score', step: 0.5 },
-    { key: 'usageHours', label: 'Monthly Usage Hours', step: 10 },
+    { key: 'paymentDelay', label: 'Payment Delay Days', step: 1, apiKey: 'payment_delay_days_mean' },
+    { key: 'featureAdoption', label: 'Feature Adoption %', step: 5, apiKey: 'feature_adoption_pct_mean' },
+    { key: 'supportTickets', label: 'Support Tickets (90d)', step: 1, apiKey: 'total_tickets' },
+    { key: 'lastLogin', label: 'Day Since Last Login', step: 1, apiKey: 'days_since_last_login' },
+    { key: 'annualValue', label: 'Annual Value ($)', step: 500, apiKey: 'annual_value' },
+    { key: 'healthScore', label: 'Payment Health Score', step: 5, apiKey: 'payment_health_score' },
+    { key: 'npsScore', label: 'Avg NPS Score', step: 0.5, apiKey: 'avg_nps_score' },
+    { key: 'usageHours', label: 'Monthly Usage Hours', step: 10, apiKey: 'avg_monthly_usage_hours' },
     { key: 'threshold', label: 'Threshold', step: 0.05 }
   ]
 
@@ -37,23 +73,78 @@ export default function PredictionView() {
 
   const handleInputChange = (key, value) => setFormData(prev => ({ ...prev, [key]: value }))
 
-  const handleFetch = () => {
+  const handleFetch = async () => {
     if (!customerIdA) return
     setFetchState('fetching')
+    setError('')
     setPredictState('idle')
-    setTimeout(() => {
-      setFetchState('fetched')
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/customer/${customerIdA}/features?plan_type=${planTypeA}`)
+      if (!response.ok) throw new Error('Customer not found')
+      const data = await response.json()
+      
+      const profile = data.profile
       setFormData({
-        paymentDelay: '14', featureAdoption: '45', supportTickets: '3', lastLogin: '12', annualValue: '50000',
-        healthScore: '62', npsScore: '4', usageHours: '120', threshold: '0.5'
+        paymentDelay: profile.payment_delay_days_mean?.toString() || '0',
+        featureAdoption: profile.feature_adoption_pct_mean?.toString() || '0',
+        supportTickets: profile.total_tickets?.toString() || '0',
+        lastLogin: profile.days_since_last_login?.toString() || '0',
+        annualValue: profile.annual_value?.toString() || '0',
+        healthScore: profile.payment_health_score?.toString() || '0',
+        npsScore: profile.avg_nps_score?.toString() || '0',
+        usageHours: profile.avg_monthly_usage_hours?.toString() || '0',
+        threshold: '0.5'
       })
-    }, 800)
+      setFetchState('fetched')
+    } catch (err) {
+      setError('Failed to fetch customer data: ' + err.message)
+      setFetchState('idle')
+    }
   }
 
-  const handlePredict = () => {
+  const handlePredict = async () => {
     if (fetchState !== 'fetched') return
     setPredictState('predicting')
-    setTimeout(() => { setPredictState('predicted') }, 1200)
+    setError('')
+    
+    try {
+      const overrides = {}
+      const mapping = {
+        paymentDelay: 'payment_delay_days_mean',
+        featureAdoption: 'feature_adoption_pct_mean',
+        supportTickets: 'total_tickets',
+        lastLogin: 'days_since_last_login',
+        annualValue: 'annual_value',
+        healthScore: 'payment_health_score',
+        npsScore: 'avg_nps_score',
+        usageHours: 'avg_monthly_usage_hours'
+      }
+      
+      Object.entries(mapping).forEach(([key, apiKey]) => {
+        if (formData[key]) overrides[apiKey] = parseFloat(formData[key])
+      })
+
+      const response = await fetch(`${API_BASE_URL}/api/predict/churn`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customer_id: customerIdA,
+          plan_type: planTypeA,
+          model_choice: selectedModel === 'Ensemble' ? 'Ensemble (Recommended)' : selectedModel + ' Only',
+          threshold: parseFloat(formData.threshold),
+          overrides: overrides
+        })
+      })
+      
+      if (!response.ok) throw new Error('Prediction failed')
+      const result = await response.json()
+      setPredictionResult(result)
+      setPredictState('predicted')
+    } catch (err) {
+      setError('Prediction error: ' + err.message)
+      setPredictState('idle')
+    }
   }
 
   return (
@@ -99,7 +190,11 @@ export default function PredictionView() {
                   <select className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-500 bg-slate-50"
                     value={customerIdA} onChange={(e) => setCustomerIdA(e.target.value)}>
                     <option value="" disabled>Select ID...</option>
-                    {customersByPlan[planTypeA]?.map(id => <option key={id} value={id}>{id}</option>)}
+                    {availableCustomers.length > 0 ? (
+                      availableCustomers.map(id => <option key={id} value={id}>{id}</option>)
+                    ) : (
+                      <option disabled>Loading...</option>
+                    )}
                   </select>
                   <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                 </div>
@@ -111,13 +206,13 @@ export default function PredictionView() {
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center"><p className="text-[9px] font-bold text-slate-500 uppercase mb-1">Total Customer</p><h3 className="text-lg font-black text-slate-800">1,245</h3></div>
-            <div className="bg-rose-50 border border-rose-100 rounded-xl p-3 text-center"><p className="text-[9px] font-bold text-rose-500 uppercase mb-1">Actual Churned</p><h3 className="text-lg font-black text-rose-700">182</h3></div>
-            <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-center"><p className="text-[9px] font-bold text-amber-500 uppercase mb-1">High Risk ({'>'}50%)</p><h3 className="text-lg font-black text-amber-700">84</h3></div>
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center"><p className="text-[9px] font-bold text-slate-500 uppercase mb-1">Total Customer</p><h3 className="text-lg font-black text-slate-800">{churnAnalysis?.plan_summary?.total_customers?.toLocaleString() || '1,245'}</h3></div>
+            <div className="bg-rose-50 border border-rose-100 rounded-xl p-3 text-center"><p className="text-[9px] font-bold text-rose-500 uppercase mb-1">Actual Churned</p><h3 className="text-lg font-black text-rose-700">{churnAnalysis?.plan_summary?.actual_churned?.toLocaleString() || '182'}</h3></div>
+            <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-center"><p className="text-[9px] font-bold text-amber-500 uppercase mb-1">High Risk ({'>'}50%)</p><h3 className="text-lg font-black text-amber-700">{churnAnalysis?.plan_summary?.high_risk_customers?.toLocaleString() || '84'}</h3></div>
             <div className="bg-white border border-indigo-100 rounded-xl p-3 text-center col-span-3 md:col-span-3 flex justify-around items-center">
-              <div><p className="text-[9px] font-bold text-slate-500 uppercase mb-1">XGBoost Acc</p><h3 className="text-sm font-black text-indigo-700">92.4%</h3></div><div className="w-px h-8 bg-slate-200"></div>
-              <div><p className="text-[9px] font-bold text-slate-500 uppercase mb-1">CatBoost Acc</p><h3 className="text-sm font-black text-indigo-700">91.8%</h3></div><div className="w-px h-8 bg-slate-200"></div>
-              <div><p className="text-[9px] font-bold text-slate-500 uppercase mb-1">Ensemble Acc</p><h3 className="text-sm font-black text-indigo-700">93.5%</h3></div>
+              <div><p className="text-[9px] font-bold text-slate-500 uppercase mb-1">XGBoost Acc</p><h3 className="text-sm font-black text-indigo-700">{churnAnalysis?.plan_summary?.model_accuracies?.xgboost ? (churnAnalysis.plan_summary.model_accuracies.xgboost * 100).toFixed(1) + '%' : '92.4%'}</h3></div><div className="w-px h-8 bg-slate-200"></div>
+              <div><p className="text-[9px] font-bold text-slate-500 uppercase mb-1">CatBoost Acc</p><h3 className="text-sm font-black text-indigo-700">{churnAnalysis?.plan_summary?.model_accuracies?.catboost ? (churnAnalysis.plan_summary.model_accuracies.catboost * 100).toFixed(1) + '%' : '91.8%'}</h3></div><div className="w-px h-8 bg-slate-200"></div>
+              <div><p className="text-[9px] font-bold text-slate-500 uppercase mb-1">Ensemble Acc</p><h3 className="text-sm font-black text-indigo-700">{churnAnalysis?.plan_summary?.model_accuracies?.ensemble ? (churnAnalysis.plan_summary.model_accuracies.ensemble * 100).toFixed(1) + '%' : '93.5%'}</h3></div>
             </div>
           </div>
 
@@ -153,7 +248,14 @@ export default function PredictionView() {
             </div>
           </div>
 
-          {predictState === 'predicted' && (
+          {error && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700 flex gap-2">
+              <AlertTriangle size={16} className="shrink-0" />
+              {error}
+            </div>
+          )}
+
+          {predictState === 'predicted' && predictionResult && (
             <div className="bg-gradient-to-r from-rose-50 to-white rounded-2xl border border-rose-100 shadow-sm p-6 animate-in zoom-in-95 duration-500">
               <h3 className="text-[13px] font-black text-slate-800 tracking-wider mb-4 border-b border-rose-100 pb-2">Prediction Result</h3>
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -161,34 +263,50 @@ export default function PredictionView() {
                   <div>
                     <p className="text-[10px] font-bold text-slate-500 uppercase mb-1">Customer Status</p>
                     <div className="flex items-center gap-3">
-                      <span className="bg-rose-500 text-white text-sm font-black px-3 py-1 rounded shadow-sm tracking-wide">CHURN</span>
-                      <span className="text-xl font-black text-rose-600">85.2% Prob.</span>
+                      <span className={`${predictionResult.predicted_status ? 'bg-rose-500' : 'bg-green-500'} text-white text-sm font-black px-3 py-1 rounded shadow-sm tracking-wide`}>
+                        {predictionResult.predicted_status ? 'CHURN' : 'RETAINED'}
+                      </span>
+                      <span className={`text-xl font-black ${predictionResult.predicted_status ? 'text-rose-600' : 'text-green-600'}`}>
+                        {(predictionResult.probability * 100).toFixed(1)}% Prob.
+                      </span>
                     </div>
                   </div>
                   <div>
-                    <p className="text-[10px] font-bold text-slate-500 uppercase mb-1">Model Performance Rating</p>
+                    <p className="text-[10px] font-bold text-slate-500 uppercase mb-1">Model: {predictionResult.model}</p>
+                    <p className="text-[11px] text-slate-700">Risk Level: <strong>{predictionResult.risk_level}</strong></p>
+                    <p className="text-[10px] text-slate-600 mt-1">Evaluation: {predictionResult.evaluation}</p>
+                  </div>
+                  {predictionResult.evaluation.includes('FALSE') && (
                     <div className="bg-amber-50 border border-amber-200 text-amber-700 text-[11px] font-bold p-2 rounded-lg flex gap-2 items-start">
                       <AlertTriangle size={14} className="shrink-0 mt-0.5" />
-                      <p><strong>False Positive:</strong> Customer is actual <em>Not Churn</em>, but predicted <em>Churn</em>. Review risk factors below.</p>
+                      <p>{predictionResult.explanation}</p>
                     </div>
-                  </div>
+                  )}
                 </div>
                 <div className="lg:col-span-2 space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <p className="text-[10px] font-bold text-slate-500 uppercase mb-2">Top Risk Factors (SHAP)</p>
+                      <p className="text-[10px] font-bold text-slate-500 uppercase mb-2">Top Risk Factors</p>
                       <ul className="space-y-2 text-[11px] font-medium text-slate-700">
-                        <li className="flex justify-between items-center border-b border-slate-100 pb-1"><span>1. Payment Delay (14 Days)</span> <span className="text-rose-500 font-bold">+25% Risk</span></li>
-                        <li className="flex justify-between items-center border-b border-slate-100 pb-1"><span>2. Support Tickets (3 Unresolved)</span> <span className="text-rose-500 font-bold">+15% Risk</span></li>
-                        <li className="flex justify-between items-center border-b border-slate-100 pb-1"><span>3. NPS Score Drop (Score: 4)</span> <span className="text-rose-500 font-bold">+10% Risk</span></li>
+                        {predictionResult.risk_factors.slice(0, 3).map((factor, idx) => (
+                          <li key={idx} className="flex justify-between items-center border-b border-slate-100 pb-1">
+                            <span>{idx + 1}. {factor.label} ({factor.value.toFixed(2)})</span>
+                            <span className="text-rose-500 font-bold">Risk Factor</span>
+                          </li>
+                        ))}
                       </ul>
                     </div>
                     <div>
-                      <p className="text-[10px] font-bold text-slate-500 uppercase mb-2">Recommended Action</p>
+                      <p className="text-[10px] font-bold text-slate-500 uppercase mb-2">Recommended Actions</p>
                       <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3">
-                        <p className="text-[11px] font-medium text-indigo-800 leading-relaxed">
-                          Segera hubungi PIC terkait via telepon untuk menawarkan perpanjangan masa tenggang pembayaran. Eskalasi 3 tiket support yang masih menggantung ke tim teknis tier 2 hari ini juga.
-                        </p>
+                        <ul className="text-[11px] font-medium text-indigo-800 space-y-1">
+                          {predictionResult.recommendation_actions.slice(0, 3).map((action, idx) => (
+                            <li key={idx} className="flex gap-2">
+                              <span className="text-indigo-600">•</span>
+                              <span>{action}</span>
+                            </li>
+                          ))}
+                        </ul>
                       </div>
                     </div>
                   </div>
@@ -217,13 +335,32 @@ export default function PredictionView() {
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 h-[280px] flex flex-col">
               <h3 className="text-[12px] font-black text-slate-800 tracking-wider mb-4">Customer by Risk Level</h3>
               <div className="flex-1 flex items-end justify-around pb-2">
-                {[{ label: 'Low', val: 65, color: 'bg-emerald-400' }, { label: 'Medium', val: 40, color: 'bg-amber-300' }, { label: 'High', val: 25, color: 'bg-orange-400' }, { label: 'V. High', val: 15, color: 'bg-rose-500' }].map(item => (
-                  <div key={item.label} className="flex flex-col items-center gap-2 w-1/5">
-                    <span className="text-[10px] font-bold text-slate-500">{item.val}%</span>
-                    <div className={`w-full rounded-t-md transition-all hover:opacity-80 ${item.color}`} style={{ height: `${item.val * 2}px` }}></div>
-                    <span className="text-[9px] font-bold text-slate-600 uppercase">{item.label}</span>
-                  </div>
-                ))}
+                {churnAnalysis?.overall?.risk_distribution?.map(item => {
+                  const colorMap = { 'Low': 'bg-emerald-400', 'Medium': 'bg-amber-300', 'High': 'bg-orange-400', 'Very High': 'bg-rose-500' }
+                  const maxVal = Math.max(...(churnAnalysis?.overall?.risk_distribution?.map(i => i.value) || [1]))
+                  const percentage = (item.value / maxVal) * 100
+                  return (
+                    <div key={item.label} className="flex flex-col items-center gap-2 w-1/5">
+                      <span className="text-[10px] font-bold text-slate-500">{item.value}</span>
+                      <div className={`w-full rounded-t-md transition-all hover:opacity-80 ${colorMap[item.label] || 'bg-slate-300'}`} style={{ height: `${percentage}px` }}></div>
+                      <span className="text-[9px] font-bold text-slate-600 uppercase">{item.label}</span>
+                    </div>
+                  )
+                }) || [
+                  { label: 'Low', value: 65 },
+                  { label: 'Medium', value: 40 },
+                  { label: 'High', value: 25 },
+                  { label: 'Very High', value: 15 }
+                ].map(item => {
+                  const colorMap = { 'Low': 'bg-emerald-400', 'Medium': 'bg-amber-300', 'High': 'bg-orange-400', 'Very High': 'bg-rose-500' }
+                  return (
+                    <div key={item.label} className="flex flex-col items-center gap-2 w-1/5">
+                      <span className="text-[10px] font-bold text-slate-500">{item.value}%</span>
+                      <div className={`w-full rounded-t-md transition-all hover:opacity-80 ${colorMap[item.label]}`} style={{ height: `${item.value * 2}px` }}></div>
+                      <span className="text-[9px] font-bold text-slate-600 uppercase">{item.label}</span>
+                    </div>
+                  )
+                })}
               </div>
             </div>
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 h-[280px] flex flex-col">

@@ -54,11 +54,29 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ========== LOAD ENV & GEMINI ==========
+# ========== LOAD ENV & OLLAMA + GEMINI ==========
 load_dotenv()
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-2.0-flash")
+
+# Ollama Configuration (Primary LLM)
+OLLAMA_API_URL = os.getenv("OLLAMA_API_URL", "http://localhost:11434/api/generate")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "sahabat")  # atau "mistral", "neural-chat"
+OLLAMA_TIMEOUT = 60  # seconds
+
+# Check Ollama availability
+ollama_ready = False
+try:
+    import requests
+    resp = requests.get("http://localhost:11434/api/tags", timeout=2)
+    if resp.status_code == 200:
+        ollama_ready = True
+        print("✅ Ollama service detected and ready")
+    else:
+        print("⚠️ Ollama service not responding")
+except Exception as e:
+    print(f"⚠️ Ollama not available: {str(e)}")
 
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
@@ -115,7 +133,11 @@ def load_prediction_results() -> pd.DataFrame:
         results = load_ensemble_df().reset_index(drop=True)
 
     limit = min(len(engineered), len(results))
-    merged = pd.concat([engineered.iloc[:limit].copy(), results.iloc[:limit].copy()], axis=1)
+    engineered_subset = engineered.iloc[:limit].copy()
+    results_subset = results.iloc[:limit].copy()
+    
+    # Merge dengan suffix untuk menghindari conflict
+    merged = pd.concat([engineered_subset, results_subset], axis=1)
 
     merged["customer_id"] = merged["customer_id"].astype(str)
     merged["plan_type"] = merged["plan_type"].astype(str).str.capitalize()
@@ -129,16 +151,22 @@ def load_prediction_results() -> pd.DataFrame:
     merged["ensemble_proba"] = merged[proba_col].astype(float)
     merged["ensemble_prediction"] = merged[pred_col].astype(int)
     
-    if "xgb_probability" in merged.columns:
-        merged["xgb_probability"] = merged["xgb_probability"].astype(float)
-    elif "xgb_proba" not in merged.columns:
-        merged["xgb_proba"] = merged["ensemble_proba"]
+    # Ensure xgb_proba and cat_proba exist
+    if "xgb_proba" not in merged.columns:
+        if "xgb_probability" in merged.columns:
+            merged["xgb_proba"] = merged["xgb_probability"].astype(float)
+        else:
+            merged["xgb_proba"] = merged["ensemble_proba"]
         
-    if "cat_probability" in merged.columns:
-        merged["cat_proba"] = merged["cat_probability"].astype(float)
-    elif "cat_proba" not in merged.columns:
-        merged["cat_proba"] = merged["ensemble_proba"]
+    if "cat_proba" not in merged.columns:
+        if "cat_probability" in merged.columns:
+            merged["cat_proba"] = merged["cat_probability"].astype(float)
+        else:
+            merged["cat_proba"] = merged["ensemble_proba"]
+    else:
+        merged["cat_proba"] = merged["cat_proba"].astype(float)
         
+    merged["xgb_proba"] = merged["xgb_proba"].astype(float)
     merged["risk_level"] = merged["ensemble_proba"].apply(risk_label)
     return merged
 
@@ -303,6 +331,62 @@ def build_sentiment_keywords(messages: pd.Series, stopwords_set: set, top_n: int
         results.append({'word': word, 'freq': int(freq), 'type': w_type})
     return results
 
+def generate_ollama_summary(df: pd.DataFrame) -> str:
+    """Generate generative summary menggunakan Ollama (Primary LLM)"""
+    if not ollama_ready:
+        return None
+    
+    try:
+        import requests
+        
+        pos_count = int((df['sentiment'] == 'Positive').sum())
+        neg_count = int((df['sentiment'] == 'Negative').sum())
+        neutral_count = int((df['sentiment'] == 'Neutral').sum())
+        total = len(df)
+        
+        pos_msgs = df[df['sentiment'] == 'Positive']['message'].head(3).tolist()
+        neg_msgs = df[df['sentiment'] == 'Negative']['message'].head(3).tolist()
+        
+        prompt = f"""Analisa sentimen audiens berdasarkan data berikut dalam Bahasa Indonesia:
+
+Total feedback: {total} komentar
+- Positif: {pos_count} ({pos_count/total*100:.1f}%)
+- Negatif: {neg_count} ({neg_count/total*100:.1f}%)
+- Netral: {neutral_count} ({neutral_count/total*100:.1f}%)
+
+Contoh komentar positif:
+{chr(10).join([f'• {msg}' for msg in pos_msgs])}
+
+Contoh komentar negatif:
+{chr(10).join([f'• {msg}' for msg in neg_msgs])}
+
+Berikan ringkasan eksekutif 3 paragraf dengan format:
+1. **Apa yang Paling Disukai (Demands):** [analisis]
+2. **Apa yang Dikeluhkan (Pain Points):** [analisis]
+3. **Kesimpulan Akhir:** [ringkasan sentimen overall]"""
+
+        response = requests.post(
+            OLLAMA_API_URL,
+            json={
+                "model": OLLAMA_MODEL,
+                "prompt": prompt,
+                "stream": False,
+                "temperature": 0.7
+            },
+            timeout=OLLAMA_TIMEOUT
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            return result.get("response", "").strip()
+        else:
+            print(f"⚠️ Ollama error: {response.status_code}")
+            return None
+            
+    except Exception as e:
+        print(f"⚠️ Ollama generation failed: {str(e)}")
+        return None
+
 def generate_extractive_summary(df: pd.DataFrame, stopwords_set: set) -> str:
     pos_df = df[df['sentiment'] == 'Positive']
     neg_df = df[df['sentiment'] == 'Negative']
@@ -322,7 +406,7 @@ def generate_extractive_summary(df: pd.DataFrame, stopwords_set: set) -> str:
     dominant = df['sentiment'].mode()[0].upper() if not df.empty else "NETRAL"
     
     return f"""
-⚠️ **Pemberitahuan Sistem (Auto-Fallback NLP):** *Kuota API Gemini Anda telah melampaui batas setelah beberapa percobaan. Sistem telah otomatis beralih menggunakan Algoritma NLP Ekstraktif Lokal berdasarkan data terbaru:*
+📊 **Ringkasan Analisis Sentimen (Local NLP Processing)**
 
 1. **Apa yang Paling Disukai (Demands):**
 Berdasarkan analisis {len(pos_df)} komentar positif, audiens merespons dengan sangat baik pada topik seputar: **{', '.join(top_pos).upper()}**. 
@@ -371,18 +455,27 @@ def create_sentiment_analysis_payload(df: pd.DataFrame) -> Dict[str, Any]:
         'neutral': neutral,
     }
 
-    # GEMINI AI SUMMARIZATION (Sangat Ringan & Anti-Limit)
+    # PRIORITIZED LLM SUMMARIZATION: OLLAMA → GEMINI → LOCAL NLP
     executive_summary = ""
-    if gemini_ready:
+    
+    # Priority 1: Try Ollama (Primary LLM - Unlimited Free)
+    if ollama_ready:
+        print("🤖 Using Ollama for summary generation...")
+        executive_summary = generate_ollama_summary(df)
+        if executive_summary:
+            print("✅ Ollama summary generated successfully")
+    
+    # Priority 2: Fallback to Gemini if Ollama fails
+    if not executive_summary and gemini_ready:
+        print("🔄 Ollama unavailable, falling back to Gemini...")
         max_retries = 3
         retry_delay = 10
         
-        # Sangat dikecilkan sampelnya agar token API Google tidak cepat habis
         pos_samples = df[df['sentiment'] == 'Positive']['message'].dropna().head(3).apply(lambda x: str(x)[:80]).tolist()
         neg_samples = df[df['sentiment'] == 'Negative']['message'].dropna().head(3).apply(lambda x: str(x)[:80]).tolist()
         
         prompt = f"""
-Sebagai Senior Data Analyst, berikan Executive Summary singkat dalam bahasa Indonesia berdasarkan komentar YouTube ini.
+Sebagai Senior Data Analyst, berikan Executive Summary singkat dalam bahasa Indonesia berdasarkan feedback ini.
 Positif: {pos_samples}
 Negatif: {neg_samples}
 
@@ -393,23 +486,29 @@ Format WAJIB (Maksimal 3 paragraf):
 """
         for attempt in range(max_retries):
             try:
-                time.sleep(2) # Beri jeda napas sesaat sebelum menembak API
+                time.sleep(2)
                 model_instance = genai.GenerativeModel(GEMINI_MODEL_NAME)
                 response = model_instance.generate_content(prompt)
                 executive_summary = response.text
                 if executive_summary:
-                    break # Sukses, keluar dari loop
+                    print("✅ Gemini summary generated")
+                    break
             except Exception as e:
-                print(f"Gemini API Error (Attempt {attempt + 1}): {str(e)}")
+                print(f"⚠️ Gemini Error (Attempt {attempt + 1}): {str(e)}")
                 if "429" in str(e) or "quota" in str(e).lower():
                     if attempt < max_retries - 1:
                         time.sleep(retry_delay)
                     else:
                         executive_summary = generate_extractive_summary(df, all_stopwords)
+                        print("⚠️ Gemini quota exceeded, using local NLP")
                 else:
                     executive_summary = generate_extractive_summary(df, all_stopwords)
+                    print("⚠️ Gemini error, using local NLP")
                     break
-    else:
+    
+    # Priority 3: Fallback to Local NLP (Extractive)
+    if not executive_summary:
+        print("📊 Using local NLP for summary...")
         executive_summary = generate_extractive_summary(df, all_stopwords)
 
     raw_feedback = []
@@ -787,8 +886,21 @@ def api_customers(plan_type: Optional[str] = None, limit: int = 5000) -> Dict[st
 @app.get("/api/churn/analysis")
 def api_churn_analysis(plan_type: Optional[str] = None) -> Dict[str, Any]:
     predictions = load_prediction_results()
-    plan = normalize_plan(plan_type) if plan_type else sorted(predictions["plan"].unique().tolist())[0]
-    plan_df = predictions[predictions["plan"] == plan].copy()
+    
+    # Normalize plan names
+    predictions["plan"] = predictions["plan"].astype(str).str.capitalize()
+    available_plans = sorted(predictions["plan"].unique().tolist())
+    
+    plan = normalize_plan(plan_type) if plan_type else available_plans[0]
+    
+    # Find plan_df, try multiple columns
+    if "plan" in predictions.columns:
+        plan_df = predictions[predictions["plan"].astype(str).str.capitalize() == plan].copy()
+    elif "plan_type" in predictions.columns:
+        plan_df = predictions[predictions["plan_type"].astype(str).str.capitalize() == plan].copy()
+    else:
+        plan_df = predictions.copy()
+    
     if plan_df.empty: raise HTTPException(status_code=404, detail=f"No churn analysis data found for plan: {plan}")
 
     plan_summary = {
