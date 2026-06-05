@@ -76,4 +76,4 @@ MIN_COMMENTS_FOR_ANALYSIS = 10
 MIN_MESSAGE_LENGTH = 1
 MAX_MESSAGE_LENGTH = 5000
 
-print(f"✅ NLP Configuration Loaded | Project: {PROJECT_ROOT} | APIs: {'✓' if YOUTUBE_API_KEY and GEMINI_API_KEY else '✗'}")
+print(f"[OK] NLP Configuration Loaded | Project: {PROJECT_ROOT} | APIs: {'OK' if YOUTUBE_API_KEY and GEMINI_API_KEY else 'MISSING'}")

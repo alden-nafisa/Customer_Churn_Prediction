@@ -23,11 +23,12 @@ from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 import emoji
 import nltk
-import torch
-import google.generativeai as genai
 from nltk.corpus import stopwords
 from transformers import pipeline
 from googleapiclient.discovery import build
+
+# ========== LOCAL INDOBERT IMPORTS ==========
+from indobert_summarizer import IndoBERTSummarizationEngine
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ENGINEERED_FEATURES_PATH = PROJECT_ROOT / "engineered_features" / "lapisai_engineered_features.csv"
@@ -54,35 +55,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ========== LOAD ENV & OLLAMA + GEMINI ==========
+# ========== LOAD ENV & LOCAL INDOBERT ==========
 load_dotenv()
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-2.0-flash")
 
-# Ollama Configuration (Primary LLM)
-OLLAMA_API_URL = os.getenv("OLLAMA_API_URL", "http://localhost:11434/api/generate")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "sahabat")  # atau "mistral", "neural-chat"
-OLLAMA_TIMEOUT = 60  # seconds
-
-# Check Ollama availability
-ollama_ready = False
+# Initialize local IndoBERT summarizer (no external APIs needed)
+print("🚀 Initializing local IndoBERT summarization engine...")
 try:
-    import requests
-    resp = requests.get("http://localhost:11434/api/tags", timeout=2)
-    if resp.status_code == 200:
-        ollama_ready = True
-        print("✅ Ollama service detected and ready")
-    else:
-        print("⚠️ Ollama service not responding")
+    summarizer_engine = IndoBERTSummarizationEngine(cache_enabled=True)
+    health = summarizer_engine.health_check()
+    print(f"✅ IndoBERT engine ready | {health}")
 except Exception as e:
-    print(f"⚠️ Ollama not available: {str(e)}")
-
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-    gemini_ready = True
-else:
-    gemini_ready = False
+    print(f"⚠️ Warning initializing IndoBERT: {e}")
+    summarizer_engine = None
 
 
 class LoginRequest(BaseModel):
@@ -195,7 +180,7 @@ def load_models(plan_type: str) -> Dict[str, Any]:
 
 
 # ==============================================================================
-# ======================== NLP CORE (INDOBERT & GEMINI) ========================
+# ======================== NLP CORE (LOCAL INDOBERT ONLY) ========================
 # ==============================================================================
 
 @lru_cache(maxsize=1)
@@ -331,60 +316,52 @@ def build_sentiment_keywords(messages: pd.Series, stopwords_set: set, top_n: int
         results.append({'word': word, 'freq': int(freq), 'type': w_type})
     return results
 
-def generate_ollama_summary(df: pd.DataFrame) -> str:
-    """Generate generative summary menggunakan Ollama (Primary LLM)"""
-    if not ollama_ready:
+def generate_indobert_summary(df: pd.DataFrame) -> str:
+    """Generate summary menggunakan local IndoBERT (no external APIs)"""
+    if not summarizer_engine:
         return None
     
     try:
-        import requests
+        pos_df = df[df['sentiment'] == 'Positive']
+        neg_df = df[df['sentiment'] == 'Negative']
         
-        pos_count = int((df['sentiment'] == 'Positive').sum())
-        neg_count = int((df['sentiment'] == 'Negative').sum())
-        neutral_count = int((df['sentiment'] == 'Neutral').sum())
+        # Get sample texts
+        pos_texts = pos_df['message'].dropna().head(5).tolist()
+        neg_texts = neg_df['message'].dropna().head(5).tolist()
+        
+        pos_summary = ""
+        neg_summary = ""
+        
+        # Summarize positive feedback
+        if pos_texts:
+            combined_pos = " ".join(pos_texts)
+            pos_summary = summarizer_engine.summarize_text(combined_pos, max_length=100, min_length=30)
+        
+        # Summarize negative feedback
+        if neg_texts:
+            combined_neg = " ".join(neg_texts)
+            neg_summary = summarizer_engine.summarize_text(combined_neg, max_length=100, min_length=30)
+        
+        pos_count = len(pos_df)
+        neg_count = len(neg_df)
         total = len(df)
         
-        pos_msgs = df[df['sentiment'] == 'Positive']['message'].head(3).tolist()
-        neg_msgs = df[df['sentiment'] == 'Negative']['message'].head(3).tolist()
-        
-        prompt = f"""Analisa sentimen audiens berdasarkan data berikut dalam Bahasa Indonesia:
+        summary = f"""
+📊 **Ringkasan Analisis Sentimen (IndoBERT Local Processing)**
 
-Total feedback: {total} komentar
-- Positif: {pos_count} ({pos_count/total*100:.1f}%)
-- Negatif: {neg_count} ({neg_count/total*100:.1f}%)
-- Netral: {neutral_count} ({neutral_count/total*100:.1f}%)
+1. **Apa yang Paling Disukai (Demands):**
+Berdasarkan {pos_count} komentar positif: {pos_summary or 'Audiens memberikan respons positif terhadap produk/layanan.'}
 
-Contoh komentar positif:
-{chr(10).join([f'• {msg}' for msg in pos_msgs])}
+2. **Apa yang Dikeluhkan (Pain Points):**
+Dari {neg_count} komentar negatif: {neg_summary or 'Audiens memiliki beberapa keluhan yang perlu diperhatikan.'}
 
-Contoh komentar negatif:
-{chr(10).join([f'• {msg}' for msg in neg_msgs])}
-
-Berikan ringkasan eksekutif 3 paragraf dengan format:
-1. **Apa yang Paling Disukai (Demands):** [analisis]
-2. **Apa yang Dikeluhkan (Pain Points):** [analisis]
-3. **Kesimpulan Akhir:** [ringkasan sentimen overall]"""
-
-        response = requests.post(
-            OLLAMA_API_URL,
-            json={
-                "model": OLLAMA_MODEL,
-                "prompt": prompt,
-                "stream": False,
-                "temperature": 0.7
-            },
-            timeout=OLLAMA_TIMEOUT
-        )
-        
-        if response.status_code == 200:
-            result = response.json()
-            return result.get("response", "").strip()
-        else:
-            print(f"⚠️ Ollama error: {response.status_code}")
-            return None
-            
+3. **Kesimpulan Akhir:**
+Dari total {total} feedback, sentimen positif: {pos_count/total*100:.1f}%, negatif: {neg_count/total*100:.1f}%, netral: {(total-pos_count-neg_count)/total*100:.1f}%.
+"""
+        return summary.strip()
+    
     except Exception as e:
-        print(f"⚠️ Ollama generation failed: {str(e)}")
+        print(f"⚠️ IndoBERT summary generation failed: {e}")
         return None
 
 def generate_extractive_summary(df: pd.DataFrame, stopwords_set: set) -> str:
@@ -455,60 +432,15 @@ def create_sentiment_analysis_payload(df: pd.DataFrame) -> Dict[str, Any]:
         'neutral': neutral,
     }
 
-    # PRIORITIZED LLM SUMMARIZATION: OLLAMA → GEMINI → LOCAL NLP
+    # PRIORITIZED LLM SUMMARIZATION: INDOBERT LOCAL (No External APIs)
     executive_summary = ""
     
-    # Priority 1: Try Ollama (Primary LLM - Unlimited Free)
-    if ollama_ready:
-        print("🤖 Using Ollama for summary generation...")
-        executive_summary = generate_ollama_summary(df)
-        if executive_summary:
-            print("✅ Ollama summary generated successfully")
+    # Use local IndoBERT for all summarization (no external APIs needed)
+    print("🤖 Using local IndoBERT for summary generation...")
+    executive_summary = generate_indobert_summary(df)
     
-    # Priority 2: Fallback to Gemini if Ollama fails
-    if not executive_summary and gemini_ready:
-        print("🔄 Ollama unavailable, falling back to Gemini...")
-        max_retries = 3
-        retry_delay = 10
-        
-        pos_samples = df[df['sentiment'] == 'Positive']['message'].dropna().head(3).apply(lambda x: str(x)[:80]).tolist()
-        neg_samples = df[df['sentiment'] == 'Negative']['message'].dropna().head(3).apply(lambda x: str(x)[:80]).tolist()
-        
-        prompt = f"""
-Sebagai Senior Data Analyst, berikan Executive Summary singkat dalam bahasa Indonesia berdasarkan feedback ini.
-Positif: {pos_samples}
-Negatif: {neg_samples}
-
-Format WAJIB (Maksimal 3 paragraf):
-1. **Apa yang Paling Disukai (Demands):**
-2. **Apa yang Dikeluhkan (Pain Points):**
-3. **Kesimpulan Akhir:**
-"""
-        for attempt in range(max_retries):
-            try:
-                time.sleep(2)
-                model_instance = genai.GenerativeModel(GEMINI_MODEL_NAME)
-                response = model_instance.generate_content(prompt)
-                executive_summary = response.text
-                if executive_summary:
-                    print("✅ Gemini summary generated")
-                    break
-            except Exception as e:
-                print(f"⚠️ Gemini Error (Attempt {attempt + 1}): {str(e)}")
-                if "429" in str(e) or "quota" in str(e).lower():
-                    if attempt < max_retries - 1:
-                        time.sleep(retry_delay)
-                    else:
-                        executive_summary = generate_extractive_summary(df, all_stopwords)
-                        print("⚠️ Gemini quota exceeded, using local NLP")
-                else:
-                    executive_summary = generate_extractive_summary(df, all_stopwords)
-                    print("⚠️ Gemini error, using local NLP")
-                    break
-    
-    # Priority 3: Fallback to Local NLP (Extractive)
     if not executive_summary:
-        print("📊 Using local NLP for summary...")
+        print("📊 Fallback to local extractive NLP...")
         executive_summary = generate_extractive_summary(df, all_stopwords)
 
     raw_feedback = []

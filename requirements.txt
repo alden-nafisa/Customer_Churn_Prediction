@@ -20,8 +20,8 @@ seaborn>=0.12.0
 nltk>=3.8
 transformers>=4.30.0
 torch>=2.0.0
-google-generativeai>=0.3.0
 google-api-python-client>=2.80.0
+rouge-score>=0.1.2
 
 # API & Backend
 fastapi>=0.100.0
