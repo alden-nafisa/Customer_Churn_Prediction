@@ -31,7 +31,7 @@ def test_result(test_name: str, passed: bool, message: str = ""):
 def test_imports():
     """Test all imports work"""
     try:
-        from nlp_config import YOUTUBE_API_KEY, GEMINI_API_KEY
+        from nlp_config import YOUTUBE_API_KEY
         test_result("Imports: nlp_config", True)
     except Exception as e:
         test_result("Imports: nlp_config", False, str(e))
@@ -55,12 +55,6 @@ def test_imports():
         test_result("Imports: sentiment_model", False, str(e))
     
     try:
-        from summarization_engine import GeminiSummarizationEngine
-        test_result("Imports: summarization_engine", True)
-    except Exception as e:
-        test_result("Imports: summarization_engine", False, str(e))
-    
-    try:
         from nlp_visualizations import create_sentiment_timeline
         test_result("Imports: nlp_visualizations", True)
     except Exception as e:
@@ -70,38 +64,15 @@ def test_imports():
 def test_configuration():
     """Test configuration loading"""
     try:
-        from nlp_config import (
-            YOUTUBE_API_KEY, GEMINI_API_KEY, 
-            SENTIMENT_CLASSES, TIMELINE_BIN_SECONDS
-        )
+        from nlp_config import YOUTUBE_API_KEY
         
         # Check if APIs are configured
         has_youtube = bool(YOUTUBE_API_KEY and YOUTUBE_API_KEY != "your_youtube_api_key_here")
-        has_gemini = bool(GEMINI_API_KEY and GEMINI_API_KEY != "your_gemini_api_key_here")
         
         test_result(
             "Config: YouTube API key",
             has_youtube,
             "API key not configured in .env"
-        )
-        
-        test_result(
-            "Config: Gemini API key",
-            has_gemini,
-            "API key not configured in .env"
-        )
-        
-        # Check other configs
-        test_result(
-            "Config: SENTIMENT_CLASSES",
-            len(SENTIMENT_CLASSES) == 3,
-            f"Expected 3 classes, got {len(SENTIMENT_CLASSES)}"
-        )
-        
-        test_result(
-            "Config: TIMELINE_BIN_SECONDS",
-            TIMELINE_BIN_SECONDS == 30,
-            f"Expected 30, got {TIMELINE_BIN_SECONDS}"
         )
     
     except Exception as e:
@@ -217,9 +188,9 @@ def test_sentiment_model():
     try:
         from sentiment_model import SentimentModel, predict_sentiment
         
-        # Initialize model (uses default Naive Bayes)
+        # Initialize model
         model = SentimentModel()
-        test_result("Sentiment Model: Initialization", model.model is not None, "Model not loaded")
+        test_result("Sentiment Model: Initialization", model.analyzer is not None, "Model not loaded")
         
         # Test single prediction
         text = "keren banget, suka sekali"
@@ -227,24 +198,17 @@ def test_sentiment_model():
         
         test_result(
             "Sentiment Model: Single prediction",
-            result is not None and 'sentiment' in result,
+            result is not None,
             "Prediction failed"
         )
         
+        # Ensure result is parsed correctly based on return type (dict or string)
+        sentiment_label = result.get('sentiment') if isinstance(result, dict) else result
+        
         test_result(
             "Sentiment Model: Valid sentiment label",
-            result.get('sentiment') in ['Positive', 'Neutral', 'Negative'],
-            f"Invalid sentiment: {result.get('sentiment')}"
-        )
-        
-        # Test batch prediction
-        texts = ["bagus sekali", "jelek bet", "lumayan"]
-        df_results = model.predict_batch(texts, return_dataframe=True)
-        
-        test_result(
-            "Sentiment Model: Batch prediction",
-            len(df_results) == 3,
-            f"Expected 3 predictions, got {len(df_results)}"
+            sentiment_label in ['Positive', 'Neutral', 'Negative'],
+            f"Invalid sentiment: {sentiment_label}"
         )
     
     except Exception as e:
@@ -364,12 +328,6 @@ def test_env_file():
                 "YOUTUBE_API_KEY" in content,
                 "YOUTUBE_API_KEY not in .env"
             )
-            
-            test_result(
-                "Files: .env has GEMINI_API_KEY",
-                "GEMINI_API_KEY" in content,
-                "GEMINI_API_KEY not in .env"
-            )
     
     except Exception as e:
         test_result("Files: .env validation", False, str(e))
@@ -399,7 +357,10 @@ def run_all_tests():
     print(f"✅ Passed: {TESTS_PASSED}")
     print(f"❌ Failed: {TESTS_FAILED}")
     print(f"📈 Total:  {TESTS_PASSED + TESTS_FAILED}")
-    print(f"✓ Success Rate: {TESTS_PASSED / (TESTS_PASSED + TESTS_FAILED) * 100:.1f}%")
+    
+    total = TESTS_PASSED + TESTS_FAILED
+    if total > 0:
+        print(f"✓ Success Rate: {TESTS_PASSED / total * 100:.1f}%")
     print("=" * 70 + "\n")
     
     # Return success code

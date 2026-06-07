@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional, Dict
 
 import numpy as np
 import pandas as pd
@@ -38,13 +38,20 @@ TIER1_FEATURES_MAPPING = {
 def fetch_customer_data(
     customer_id: str,
     engineered_features_df: pd.DataFrame,
-) -> dict[str, Any] | None:
+) -> Optional[Dict[str, Any]]:
     """Fetch customer data by customer_id from engineered features."""
     try:
         row = engineered_features_df[engineered_features_df["customer_id"] == customer_id]
         if row.empty:
             return None
-        return row.iloc[0].to_dict()
+        
+        # Pylance Golden Rule: Extract properly into a strongly-typed Dict
+        raw_dict = row.iloc[0].to_dict()
+        result_dict: Dict[str, Any] = {}
+        for k, v in raw_dict.items():
+            result_dict[str(k)] = v
+            
+        return result_dict
     except Exception as e:
         st.error(f"Error fetching customer data: {e}")
         return None
@@ -134,22 +141,22 @@ def extract_tier1_features(customer_data: dict[str, Any]) -> dict[str, float]:
     tier1 = {}
 
     # Days Since Last Login
-    tier1["days_since_last_login"] = customer_data.get("days_since_last_login_mean", 0)
+    tier1["days_since_last_login"] = customer_data.get("days_since_last_login_mean", 0.0)
 
     # Payment Delay Days
-    tier1["payment_delay_days"] = customer_data.get("payment_delay_days_mean", 0)
+    tier1["payment_delay_days"] = customer_data.get("payment_delay_days_mean", 0.0)
 
     # Avg NPS Score
-    tier1["avg_nps_score"] = customer_data.get("nps_score_mean", 50)
+    tier1["avg_nps_score"] = customer_data.get("nps_score_mean", 50.0)
 
     # Dunning Event Count
-    tier1["dunning_event_count"] = customer_data.get("dunning_event_count", 0)
+    tier1["dunning_event_count"] = customer_data.get("dunning_event_count", 0.0)
 
     # Critical Ticket Ratio (estimate from support data if available)
-    tier1["critical_ticket_ratio"] = customer_data.get("support_critical_ratio", 0)
+    tier1["critical_ticket_ratio"] = customer_data.get("support_critical_ratio", 0.0)
 
     # Revenue at Risk (MRR equivalent)
-    tier1["revenue_at_risk"] = customer_data.get("revenue_at_risk", 0)
+    tier1["revenue_at_risk"] = customer_data.get("revenue_at_risk", 0.0)
 
     return tier1
 
@@ -200,11 +207,6 @@ def compute_whatif_adjusted_probability(
 ) -> float:
     """
     Compute adjusted churn probability based on what-if adjustments.
-    
-    Sensitivity values (empirically tuned):
-    - 10% discount → -4% churn probability
-    - 7 days faster support → -3% churn probability
-    - 10 NPS points improvement → -2% churn probability
     """
     adjustment = 0
 
@@ -218,7 +220,7 @@ def compute_whatif_adjusted_probability(
     adjustment += nps_improvement * 0.002
 
     new_prob = max(0, min(1, base_probability - adjustment))
-    return new_prob
+    return float(new_prob)
 
 
 def render_churn_analysis_prediction_page(
@@ -545,10 +547,11 @@ def render_churn_analysis_prediction_page(
                     "Impact %": [45, 32, 28, 22, 18],
                 }
             )
-            fig = px.barh(
+            fig = px.bar(
                 drivers_df,
                 x="Impact %",
                 y="Factor",
+                orientation='h',
                 title="Top Churn Drivers (Current Month)",
             )
             fig.update_layout(height=300, showlegend=False)
@@ -693,9 +696,14 @@ def generate_ai_stream_summary(
         tone = "rendah"
         sentiment_word = "kekhawatiran"
 
-    # Find peak engagement time
-    peak_idx = timeline_df[["Positive", "Neutral", "Negative"]].sum(axis=1).idxmax()
-    peak_time = timeline_df.iloc[peak_idx].get("time_str", "0:00")
+    # Fix sum operator Pylance issue for peak time
+    cols = [c for c in ["Positive", "Neutral", "Negative"] if c in timeline_df.columns]
+    peak_time = "0:00"
+    if not timeline_df.empty and cols:
+        sums = timeline_df[cols].sum(axis=1)
+        peak_idx = sums.idxmax()
+        if pd.notna(peak_idx):
+            peak_time = str(timeline_df.loc[peak_idx, "time_str"])
 
     keywords_str = ", ".join(top_keywords[:3])
 
@@ -717,33 +725,9 @@ def extract_keywords(
 
     if stop_words is None:
         stop_words = {
-            "dan",
-            "atau",
-            "yang",
-            "untuk",
-            "di",
-            "ke",
-            "ini",
-            "itu",
-            "gw",
-            "lu",
-            "ni",
-            "lah",
-            "nih",
-            "sih",
-            "yah",
-            "yeah",
-            "ok",
-            "1",
-            "2",
-            "L",
-            "the",
-            "a",
-            "is",
-            "in",
-            "at",
-            "to",
-            "of",
+            "dan", "atau", "yang", "untuk", "di", "ke", "ini", "itu", "gw", "lu",
+            "ni", "lah", "nih", "sih", "yah", "yeah", "ok", "1", "2", "L", "the",
+            "a", "is", "in", "at", "to", "of",
         }
 
     # Tokenize and clean
@@ -866,9 +850,14 @@ def render_audience_chat_analysis_page(chat_df: pd.DataFrame) -> None:
 
     st.subheader("📊 Session Summary & Engagement")
 
-    # AI Stream Summary
-    summary_text = generate_ai_stream_summary(timeline_df, sentiment_dist, all_keywords)
-    st.info(f"**AI Stream Summary**: {summary_text}")
+    # String formatting keys specifically for Plotly charts requirement
+    sentiment_dist_str = {str(k): float(v) for k, v in sentiment_dist.items()}
+    dist_data = pd.DataFrame(
+        {
+            "Sentiment": list(sentiment_dist_str.keys()),
+            "Percentage": [v * 100 for v in sentiment_dist_str.values()],
+        }
+    )
 
     # KPI Cards
     col1, col2, col3, col4 = st.columns(4)
@@ -881,11 +870,15 @@ def render_audience_chat_analysis_page(chat_df: pd.DataFrame) -> None:
         st.metric("Avg Messages/Min", f"{avg_mpm:.0f}")
 
     with col3:
-        peak_time = timeline_df.loc[
-            timeline_df[["Positive", "Neutral", "Negative"]].sum(axis=1).idxmax(),
-            "time_str",
-        ]
-        st.metric("Peak Time", peak_time)
+        cols = [c for c in ["Positive", "Neutral", "Negative"] if c in timeline_df.columns]
+        peak_time = "0:00"
+        if not timeline_df.empty and cols:
+            sums = timeline_df[cols].sum(axis=1)
+            peak_idx = sums.idxmax()
+            if pd.notna(peak_idx):
+                peak_time = str(timeline_df.loc[peak_idx, "time_str"])
+                
+        st.metric(label="Peak Time", value=str(peak_time))
 
     with col4:
         top_sentiment = max(sentiment_dist.items(), key=lambda x: x[1])[0]
@@ -904,12 +897,6 @@ def render_audience_chat_analysis_page(chat_df: pd.DataFrame) -> None:
     # Sentiment Distribution Pie
     with col1:
         st.markdown("**Overall Sentiment Distribution**")
-        dist_data = pd.DataFrame(
-            {
-                "Sentiment": list(sentiment_dist.keys()),
-                "Percentage": [v * 100 for v in sentiment_dist.values()],
-            }
-        )
         fig = px.pie(
             dist_data,
             values="Percentage",
@@ -929,10 +916,11 @@ def render_audience_chat_analysis_page(chat_df: pd.DataFrame) -> None:
     with col2:
         st.markdown("**Top Keywords (All Sentiments)**")
         keywords_df = pd.DataFrame({"Keyword": all_keywords[:10], "Frequency": range(10, 0, -1)})
-        fig = px.barh(
+        fig = px.bar(
             keywords_df,
             x="Frequency",
             y="Keyword",
+            orientation='h',
             title="",
         )
         fig.update_layout(height=300, showlegend=False)

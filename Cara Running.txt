@@ -1,0 +1,24 @@
+#aktif kan dulu venv nya
+(Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned) ; (& c:\Users\HP14\Downloads\pbl6\Customer_Churn_Prediction\.venv\Scripts\Activate.ps1)
+
+# jalanin model untuk machine learning dan nlp dulu
+python 01_feature_engineering.py 
+python 02_preprocessing_pipeline.py 
+python 03_model_training_per_plan.py
+python 04_ensemble_predictions.py
+python 05_evaluation_metrics.py
+python 06_final_predictions_holdout.py
+python sentiment_model.py
+
+#open 2 terminal baru untuk jalanin backend dan frontend
+
+# running frontend
+cd frontend
+npm install
+npm run dev
+
+# running backend
+cd backend
+pip install -r requirements.txt
+uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000 (kalau running diluar file backend)
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000

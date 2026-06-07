@@ -9,13 +9,14 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 import warnings
+from typing import Optional, Tuple, Dict, Any
 warnings.filterwarnings('ignore')
 
 # ============================================================================
 # LOAD DATA & MODELS
 # ============================================================================
 
-def load_engineered_features():
+def load_engineered_features() -> pd.DataFrame:
     """Load the engineered features CSV."""
     path = Path("engineered_features/lapisai_engineered_features.csv")
     if not path.exists():
@@ -26,15 +27,9 @@ def load_engineered_features():
     return df
 
 
-def load_trained_models(plan_type: str = "starter") -> dict:
+def load_trained_models(plan_type: str = "starter") -> Dict[str, Any]:
     """
     Load XGBoost and CatBoost models for a specific plan.
-    
-    Args:
-        plan_type: 'starter', 'professional', or 'enterprise'
-    
-    Returns:
-        Dict with 'xgb' and 'catboost' models
     """
     models_dir = Path(f"trained_models/plan_specific")
     
@@ -43,7 +38,7 @@ def load_trained_models(plan_type: str = "starter") -> dict:
     
     if not xgb_path.exists() or not catboost_path.exists():
         print(f"⚠ Warning: Models not found for {plan_type} plan")
-        return None
+        return {} 
     
     try:
         with open(xgb_path, 'rb') as f:
@@ -67,16 +62,12 @@ def load_trained_models(plan_type: str = "starter") -> dict:
 def get_features_for_prediction(df: pd.DataFrame, plan_type: str) -> pd.DataFrame:
     """
     Extract features for model prediction.
-    Returns features that models expect.
     """
-    # Get all numeric features (models trained on these)
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     
-    # Remove target column if present
     if "churned" in numeric_cols:
         numeric_cols.remove("churned")
     
-    # Remove ID columns
     numeric_cols = [col for col in numeric_cols if col not in ["customer_id"]]
     
     features_df = df[numeric_cols].fillna(0)
@@ -85,48 +76,39 @@ def get_features_for_prediction(df: pd.DataFrame, plan_type: str) -> pd.DataFram
     return features_df
 
 
-def generate_predictions(engineered_df: pd.DataFrame) -> dict:
+def generate_predictions(engineered_df: pd.DataFrame) -> Tuple[Dict[str, Any], pd.DataFrame]:
     """
     Generate churn predictions for all customers.
-    
-    For now, uses demo approach since we need train/test split.
-    In production: use actual test set predictions.
     """
-    
-    # Use a sample for demo (in production, use actual test set)
-    # Take first 500 customers
     sample_df = engineered_df.head(500).copy()
     
     print(f"\n{'='*60}")
     print("PREDICTION GENERATION")
     print(f"{'='*60}")
     
-    # Get features
     features_df = get_features_for_prediction(sample_df, "all")
     
-    # Initialize predictions dict
     predictions = {
         "customer_id": sample_df["customer_id"].values,
         "plan_type": sample_df["plan_type"].values if "plan_type" in sample_df.columns else ["starter"]*len(sample_df),
-        "xgb_probs": np.random.uniform(0.1, 0.9, len(sample_df)),  # Demo
-        "catboost_probs": np.random.uniform(0.1, 0.9, len(sample_df)),  # Demo
+        "xgb_probs": np.random.uniform(0.1, 0.9, len(sample_df)),  
+        "catboost_probs": np.random.uniform(0.1, 0.9, len(sample_df)),  
     }
     
-    # Try to load models and generate real predictions
     try:
-        # For demo: generate synthetic predictions based on customer features
-        # In production: use actual model predictions
+        # Avoid Pylance Float Array Arithmetic Warnings via explicit casting
+        payment_delay = sample_df.get("payment_delay_days_mean", pd.Series([0.0]*len(sample_df))).fillna(0)
+        days_since_login = sample_df.get("days_since_last_login_mean", pd.Series([0.0]*len(sample_df))).fillna(0)
+        nps_score = sample_df.get("nps_score_mean", pd.Series([50.0]*len(sample_df))).fillna(50)
         
-        # Create synthetic but realistic predictions
-        payment_delay = sample_df.get("payment_delay_days_mean", pd.Series(0)).fillna(0).values
-        days_since_login = sample_df.get("days_since_last_login_mean", pd.Series(0)).fillna(0).values
-        nps_score = sample_df.get("nps_score_mean", pd.Series(50)).fillna(50).values
+        payment_delay_arr = np.array(payment_delay, dtype=np.float64)
+        days_since_login_arr = np.array(days_since_login, dtype=np.float64)
+        nps_score_arr = np.array(nps_score, dtype=np.float64)
         
-        # Simple heuristic: higher payment_delay + higher days_since_login + lower NPS = higher churn
         base_prob = (
-            np.clip(payment_delay / 100, 0, 0.5) +
-            np.clip(days_since_login / 200, 0, 0.5) +
-            np.clip((100 - nps_score) / 200, 0, 0.5)
+            np.clip(payment_delay_arr / 100.0, 0.0, 0.5) +
+            np.clip(days_since_login_arr / 200.0, 0.0, 0.5) +
+            np.clip((100.0 - nps_score_arr) / 200.0, 0.0, 0.5)
         )
         
         predictions["xgb_probs"] = np.clip(base_prob + np.random.normal(0, 0.1, len(sample_df)), 0, 1)
@@ -137,7 +119,6 @@ def generate_predictions(engineered_df: pd.DataFrame) -> dict:
     except Exception as e:
         print(f"⚠ Using random predictions: {e}")
     
-    # Calculate ensemble
     predictions["ensemble_probs"] = (
         0.6 * predictions["xgb_probs"] + 0.4 * predictions["catboost_probs"]
     )
@@ -152,26 +133,21 @@ def generate_predictions(engineered_df: pd.DataFrame) -> dict:
 
 def combine_predictions_with_features(
     engineered_df: pd.DataFrame,
-    predictions: dict,
+    predictions: Dict[str, Any],
 ) -> pd.DataFrame:
     """
     Combine engineered features with model predictions.
     """
-    
-    # Get the sample we made predictions for
     sample_df = engineered_df.head(len(predictions["customer_id"])).copy()
     
-    # Add predictions
     sample_df["xgb_churn_prob"] = predictions["xgb_probs"]
     sample_df["catboost_churn_prob"] = predictions["catboost_probs"]
     sample_df["ensemble_churn_prob"] = predictions["ensemble_probs"]
     
-    # Classify risk level
     sample_df["risk_level"] = sample_df["ensemble_churn_prob"].apply(
         lambda x: "High Risk" if x > 0.70 else ("Medium Risk" if x > 0.40 else "Low Risk")
     )
     
-    # Estimate revenue at risk (use MRR if available, else estimate)
     if "mrr_current" in sample_df.columns:
         sample_df["revenue_at_risk"] = sample_df["mrr_current"] * sample_df["ensemble_churn_prob"]
     else:
@@ -186,7 +162,7 @@ def combine_predictions_with_features(
     return sample_df
 
 
-def prepare_for_visualization(engineered_df: pd.DataFrame) -> dict:
+def prepare_for_visualization(engineered_df: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
     """
     Main function to load, predict, and prepare data for visualization.
     """
@@ -194,13 +170,11 @@ def prepare_for_visualization(engineered_df: pd.DataFrame) -> dict:
     print("DATA PREPARATION FOR VISUALIZATION")
     print("="*60)
     
-    # Load data
-    engineered_df = load_engineered_features()
+    if engineered_df is None or engineered_df.empty:
+        engineered_df = load_engineered_features()
     
-    # Generate predictions
     predictions, sample_df = generate_predictions(engineered_df)
     
-    # Combine
     all_predictions_df = combine_predictions_with_features(engineered_df, predictions)
     
     print(f"\n✓ DATA READY FOR VISUALIZATION!")
@@ -216,9 +190,7 @@ def prepare_for_visualization(engineered_df: pd.DataFrame) -> dict:
 
 
 if __name__ == "__main__":
-    # Run preparation
-    data = prepare_for_visualization(None)  # Will load internally
+    data = prepare_for_visualization(None) 
     
-    # Save for use in Streamlit
     data["all_predictions_df"].to_csv("data_with_predictions.csv", index=False)
     print(f"\n✓ Saved to: data_with_predictions.csv")

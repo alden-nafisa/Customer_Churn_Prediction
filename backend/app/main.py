@@ -28,9 +28,14 @@ from transformers import pipeline
 from googleapiclient.discovery import build
 
 # ========== LOCAL INDOBERT IMPORTS ==========
-from indobert_summarizer import IndoBERTSummarizationEngine
+import sys
+from pathlib import Path
+
+from summarization_engine import IndoBERTSummarizationEngine
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 ENGINEERED_FEATURES_PATH = PROJECT_ROOT / "engineered_features" / "lapisai_engineered_features.csv"
 ENSEMBLE_PREDICTIONS_PATH = PROJECT_ROOT / "model_results" / "ensemble_predictions.csv"
 EVALUATION_METRICS_PATH = PROJECT_ROOT / "model_results" / "evaluation_metrics.csv"
@@ -62,13 +67,11 @@ YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 # Initialize local IndoBERT summarizer (no external APIs needed)
 print("🚀 Initializing local IndoBERT summarization engine...")
 try:
-    summarizer_engine = IndoBERTSummarizationEngine(cache_enabled=True)
-    health = summarizer_engine.health_check()
-    print(f"✅ IndoBERT engine ready | {health}")
+    summarizer_engine = IndoBERTSummarizationEngine()
+    print("✅ IndoBERT engine ready")
 except Exception as e:
     print(f"⚠️ Warning initializing IndoBERT: {e}")
     summarizer_engine = None
-
 
 class LoginRequest(BaseModel):
     username: str
@@ -84,6 +87,27 @@ class PredictRequest(BaseModel):
 class ManualSentimentRequest(BaseModel):
     text: str = Field(default='', min_length=1)
 
+# ==============================================================================
+# ============================== HELPER FUNCTIONS ==============================
+# ==============================================================================
+
+def safe_float(val: Any, default: float = 0.0) -> float:
+    """Safe cast to float avoiding NAType errors from pandas."""
+    if pd.isna(val):
+        return default
+    try:
+        return float(val) # type: ignore
+    except (ValueError, TypeError):
+        return default
+
+def safe_int(val: Any, default: int = 0) -> int:
+    """Safe cast to int avoiding NAType errors from pandas."""
+    if pd.isna(val):
+        return default
+    try:
+        return int(float(val)) # type: ignore
+    except (ValueError, TypeError):
+        return default
 
 def _read_csv(path: Path) -> pd.DataFrame:
     if not path.exists():
@@ -178,7 +202,6 @@ def load_models(plan_type: str) -> Dict[str, Any]:
                 models[name] = pickle.load(f)
     return models
 
-
 # ==============================================================================
 # ======================== NLP CORE (LOCAL INDOBERT ONLY) ========================
 # ==============================================================================
@@ -188,7 +211,7 @@ def get_nlp_components():
     """Load IndoBERT model and stopwords (Cached in memory for API speed)"""
     print("Membaca model IndoBERT ke dalam memori...")
     indobert = pipeline(
-        "sentiment-analysis",
+        "sentiment-analysis", # type: ignore
         model="mdhugol/indonesia-bert-sentiment-classification",
         tokenizer="mdhugol/indonesia-bert-sentiment-classification"
     )
@@ -248,7 +271,6 @@ def scrape_youtube_comments(video_id: str, max_comments: int = 2000) -> List[Dic
 
 def clean_text(text: str, stopwords_set: set) -> str:
     if not isinstance(text, str): return ""
-    # Hapus emoji sepenuhnya sebelum diproses (mencegah demojize leaking)
     if hasattr(emoji, 'replace_emoji'):
         text = emoji.replace_emoji(text, replace='')
     else:
@@ -293,7 +315,6 @@ def infer_sentiment_emotion(text: str, sentiment: str) -> str:
     for emotion, terms in EMOTION_KEYWORDS.items():
         if any(term in normalized for term in terms):
             return emotion
-    # Logika fallback: jika sentimen kuat, arahkan ke emosi agar grafik tidak kosong
     if sentiment == 'Negative': return 'Annoyance'
     if sentiment == 'Positive': return 'Excitement'
     return 'Neutral'
@@ -317,27 +338,22 @@ def build_sentiment_keywords(messages: pd.Series, stopwords_set: set, top_n: int
     return results
 
 def generate_indobert_summary(df: pd.DataFrame) -> str:
-    """Generate summary menggunakan local IndoBERT (no external APIs)"""
     if not summarizer_engine:
-        return None
-    
+        return "" 
     try:
         pos_df = df[df['sentiment'] == 'Positive']
         neg_df = df[df['sentiment'] == 'Negative']
         
-        # Get sample texts
         pos_texts = pos_df['message'].dropna().head(5).tolist()
         neg_texts = neg_df['message'].dropna().head(5).tolist()
         
         pos_summary = ""
         neg_summary = ""
         
-        # Summarize positive feedback
         if pos_texts:
             combined_pos = " ".join(pos_texts)
             pos_summary = summarizer_engine.summarize_text(combined_pos, max_length=100, min_length=30)
         
-        # Summarize negative feedback
         if neg_texts:
             combined_neg = " ".join(neg_texts)
             neg_summary = summarizer_engine.summarize_text(combined_neg, max_length=100, min_length=30)
@@ -359,10 +375,9 @@ Dari {neg_count} komentar negatif: {neg_summary or 'Audiens memiliki beberapa ke
 Dari total {total} feedback, sentimen positif: {pos_count/total*100:.1f}%, negatif: {neg_count/total*100:.1f}%, netral: {(total-pos_count-neg_count)/total*100:.1f}%.
 """
         return summary.strip()
-    
     except Exception as e:
         print(f"⚠️ IndoBERT summary generation failed: {e}")
-        return None
+        return ""
 
 def generate_extractive_summary(df: pd.DataFrame, stopwords_set: set) -> str:
     pos_df = df[df['sentiment'] == 'Positive']
@@ -399,7 +414,6 @@ def create_sentiment_analysis_payload(df: pd.DataFrame) -> Dict[str, Any]:
     indobert, all_stopwords = get_nlp_components()
     df['message'] = df['message'].astype(str)
     
-    # NLP INFERENCE
     sentiments = []
     emotions = []
     for msg in df['message']:
@@ -411,7 +425,6 @@ def create_sentiment_analysis_payload(df: pd.DataFrame) -> Dict[str, Any]:
     df['sentiment'] = sentiments
     df['emotion'] = emotions
 
-    # EXPORT KE CSV OTOMATIS
     try:
         output_dir = PROJECT_ROOT / "artifacts" / "nlp"
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -432,10 +445,7 @@ def create_sentiment_analysis_payload(df: pd.DataFrame) -> Dict[str, Any]:
         'neutral': neutral,
     }
 
-    # PRIORITIZED LLM SUMMARIZATION: INDOBERT LOCAL (No External APIs)
     executive_summary = ""
-    
-    # Use local IndoBERT for all summarization (no external APIs needed)
     print("🤖 Using local IndoBERT for summary generation...")
     executive_summary = generate_indobert_summary(df)
     
@@ -458,12 +468,10 @@ def create_sentiment_analysis_payload(df: pd.DataFrame) -> Dict[str, Any]:
     for label in ['Neutral', 'Excitement', 'Annoyance', 'Sadness']:
         emotion_distribution.append({'label': label, 'value': int(emotion_counts.get(label, 0))})
 
-    # BUAT TREND DATA YANG HALUS (10 Titik Kronologis)
     try:
         trend_df = df.copy()
         trend_df['time'] = pd.to_datetime(trend_df['time'], errors='coerce')
         trend_df = trend_df.sort_values('time').reset_index(drop=True)
-        # Bagi data menjadi 10 bagian waktu (chunks) agar grafik selalu halus
         trend_df['chunk'] = pd.qcut(np.arange(len(trend_df)), q=10, labels=False, duplicates='drop')
         grouped = trend_df.groupby(['chunk', 'sentiment']).size().unstack(fill_value=0).reset_index()
         
@@ -494,7 +502,6 @@ def create_sentiment_analysis_payload(df: pd.DataFrame) -> Dict[str, Any]:
     }
 
 def create_sentiment_analysis_payload_fast(df: pd.DataFrame) -> Dict[str, Any]:
-    """Fast fallback sentiment payload that avoids loading large NLP models."""
     df = df.copy()
     df['message'] = df['message'].astype(str)
 
@@ -578,7 +585,6 @@ def create_sentiment_analysis_payload_fast(df: pd.DataFrame) -> Dict[str, Any]:
     }
 
 def load_local_sentiment_source(max_rows: int = 2000) -> pd.DataFrame:
-    """Load a local sentiment dataset as a fallback when YouTube scraping is unavailable."""
     candidate_paths = [
         CHAT_DATA_PATH,
         PROJECT_ROOT / "artifacts" / "nlp" / "gadgetin_2000_comments_analyzed.csv",
@@ -661,7 +667,7 @@ def compute_risk_factors(row: pd.Series) -> List[Dict[str, Any]]:
     ]
     for label, col, higher_is_riskier in names:
         if col not in row.index or pd.isna(row[col]): continue
-        value = float(row[col])
+        value = safe_float(row[col])
         score = value if higher_is_riskier else -value
         candidates.append({"label": label, "value": value, "score": score})
     candidates.sort(key=lambda x: x["score"], reverse=True)
@@ -682,8 +688,8 @@ def classification_summary(actual: pd.Series, predicted: pd.Series) -> Dict[str,
     f1 = (2 * precision * recall) / (precision + recall) if (precision + recall) else 0.0
 
     return {
-        "accuracy": round(float(accuracy), 4), "recall": round(float(recall), 4), "precision": round(float(precision), 4),
-        "f1": round(float(f1), 4), "counts": {"tp": tp, "tn": tn, "fp": fp, "fn": fn, "total": total},
+        "accuracy": round(safe_float(accuracy), 4), "recall": round(safe_float(recall), 4), "precision": round(safe_float(precision), 4),
+        "f1": round(safe_float(f1), 4), "counts": {"tp": tp, "tn": tn, "fp": fp, "fn": fn, "total": total},
     }
 
 def build_risk_distribution(plan_df: pd.DataFrame) -> List[Dict[str, Any]]:
@@ -703,7 +709,7 @@ def build_feature_dominance(plan_df: pd.DataFrame) -> List[Dict[str, Any]]:
     available = [column for column in feature_order if column in plan_df.columns]
     if not available: return []
     correlations = plan_df[available].corrwith(plan_df["actual"]).abs().sort_values()
-    return [{"label": label, "value": round(float(correlations[label]), 4)} for label in correlations.index]
+    return [{"label": label, "value": round(safe_float(correlations[label]), 4)} for label in correlations.index]
 
 def build_revenue_at_risk(plan_df: pd.DataFrame) -> Dict[str, Any]:
     working = plan_df.copy()
@@ -712,20 +718,20 @@ def build_revenue_at_risk(plan_df: pd.DataFrame) -> Dict[str, Any]:
     grouped = grouped.reindex(["Low", "Medium", "High"]).fillna(0)
     rows = []
     for category, row in grouped.iterrows():
-        rows.append({"risk_category": category, "total_value": round(float(row["sum"]), 4), "customer_count": int(row["count"]), "avg_value_per_customer": round(float(row["mean"]), 4)})
+        rows.append({"risk_category": category, "total_value": round(safe_float(row["sum"]), 4), "customer_count": int(row["count"]), "avg_value_per_customer": round(safe_float(row["mean"]), 4)})
     high_risk_df = working[working["ensemble_proba"] > 0.5]
-    high_risk_value = float(high_risk_df["annual_value"].sum())
-    total_value = float(working["annual_value"].sum())
+    high_risk_value = safe_float(high_risk_df["annual_value"].sum())
+    total_value = safe_float(working["annual_value"].sum())
     pct_of_total = (high_risk_value / total_value * 100) if total_value else 0.0
-    return {"value_at_high_risk": round(high_risk_value, 4), "pct_of_total_value": round(float(pct_of_total), 4), "high_risk_customers": int(len(high_risk_df)), "rows": rows}
+    return {"value_at_high_risk": round(high_risk_value, 4), "pct_of_total_value": round(safe_float(pct_of_total), 4), "high_risk_customers": int(len(high_risk_df)), "rows": rows}
 
 def build_top_customers(plan_df: pd.DataFrame, limit: int = 15) -> List[Dict[str, Any]]:
     top_df = plan_df.sort_values("ensemble_proba", ascending=False).head(limit).copy()
     result: List[Dict[str, Any]] = []
     for _, row in top_df.iterrows():
         result.append({
-            "customer_id": str(row.get("customer_id", "")), "plan": str(row.get("plan", row.get("plan_type", ""))), "tenure_months": round(float(row.get("tenure_months", 0)), 4),
-            "annual_value": round(float(row.get("annual_value", 0)), 4), "nps": round(float(row.get("avg_nps_score", 0)), 4), "risk_pct": round(float(row.get("ensemble_proba", 0)) * 100, 1),
+            "customer_id": str(row.get("customer_id", "")), "plan": str(row.get("plan", row.get("plan_type", ""))), "tenure_months": round(safe_float(row.get("tenure_months", 0)), 4),
+            "annual_value": round(safe_float(row.get("annual_value", 0)), 4), "nps": round(safe_float(row.get("avg_nps_score", 0)), 4), "risk_pct": round(safe_float(row.get("ensemble_proba", 0)) * 100, 1),
         })
     return result
 
@@ -743,19 +749,19 @@ def build_recommendation_actions(row: pd.Series, probability: float, evaluation:
     if probability > 0.7: actions.append("Contact customer immediately by phone and trigger a retention case.")
     elif probability > 0.5: actions.append("Schedule a proactive success call within 24 hours.")
     else: actions.append("Monitor the account and keep a light-touch check-in cadence.")
-    if float(row.get("payment_delay_days_mean", 0)) > 15: actions.append("Review payment delays and offer a temporary billing resolution plan.")
-    if float(row.get("total_tickets", 0)) > 2: actions.append("Escalate open support tickets to the technical owner.")
-    if float(row.get("avg_nps_score", 0)) < 6: actions.append("Run an executive check-in to recover satisfaction and product fit.")
+    if safe_float(row.get("payment_delay_days_mean", 0)) > 15: actions.append("Review payment delays and offer a temporary billing resolution plan.")
+    if safe_float(row.get("total_tickets", 0)) > 2: actions.append("Escalate open support tickets to the technical owner.")
+    if safe_float(row.get("avg_nps_score", 0)) < 6: actions.append("Run an executive check-in to recover satisfaction and product fit.")
     if evaluation == "FALSE_POSITIVE": actions.append("Validate the latest activity before offering discounts to avoid unnecessary incentive spend.")
     return actions[:4]
 
 def build_dashboard_summary_stats(engine: pd.DataFrame, predictions: pd.DataFrame) -> List[Dict[str, Any]]:
-    risk_counts, _ = np.histogram(predictions["ensemble_proba"].astype(float).to_numpy(), bins=7, range=(0, 1))
-    revenue_counts, _ = np.histogram(engine["revenue_at_risk"].astype(float).to_numpy(), bins=7)
-    nps_values = engine["avg_nps_score"].astype(float).to_numpy()
+    risk_counts, _ = np.histogram(predictions["ensemble_proba"].fillna(0).astype(float).to_numpy(), bins=7, range=(0, 1))
+    revenue_counts, _ = np.histogram(engine["revenue_at_risk"].fillna(0).astype(float).to_numpy(), bins=7)
+    nps_values = engine["avg_nps_score"].fillna(0).astype(float).to_numpy()
     if len(nps_values):
         nps_counts, _ = np.histogram(nps_values, bins=7, range=(0, 10))
-        avg_nps = float(engine["avg_nps_score"].mean())
+        avg_nps = safe_float(engine["avg_nps_score"].mean())
         nps_highlight = min(len(nps_counts) - 1, max(0, int((avg_nps / 10) * len(nps_counts))))
     else:
         nps_counts = np.array([0, 0, 0, 0, 0, 0, 0])
@@ -763,7 +769,7 @@ def build_dashboard_summary_stats(engine: pd.DataFrame, predictions: pd.DataFram
         nps_highlight = 0
     return [
         {"id": "risk", "label": "Customers at Risk", "value": f"{int((predictions['ensemble_proba'] > 0.5).sum()):,}", "chartData": [int(value) for value in risk_counts.tolist()], "color": "indigo"},
-        {"id": "revenue", "label": "Revenue at Risk", "value": f"${float(engine['revenue_at_risk'].sum()):,.0f}", "chartData": [int(value) for value in revenue_counts.tolist()], "color": "indigo"},
+        {"id": "revenue", "label": "Revenue at Risk", "value": f"${safe_float(engine['revenue_at_risk'].sum()):,.0f}", "chartData": [int(value) for value in revenue_counts.tolist()], "color": "indigo"},
         {"id": "nps", "label": "Average NPS", "value": f"{avg_nps:.1f}", "chartData": [int(value) for value in nps_counts.tolist()], "highlight": nps_highlight, "color": "indigo"},
     ]
 
@@ -771,11 +777,22 @@ def build_dashboard_customer_churn(limit_per_status: int = 10) -> List[Dict[str,
     predictions = load_prediction_results().copy()
     churned_df = predictions[predictions["actual"] == 1].sort_values("ensemble_proba", ascending=False).head(limit_per_status)
     retained_df = predictions[predictions["actual"] == 0].sort_values("ensemble_proba", ascending=False).head(limit_per_status)
+    
     combined = pd.concat([churned_df, retained_df], axis=0).head(limit_per_status * 2).copy()
     combined["status"] = np.where(combined["actual"] == 1, "Churned", "Not Churned")
     combined["type"] = combined["plan_type"].astype(str) + "/" + combined["contract_type"].astype(str)
-    combined["score"] = combined["ensemble_proba"].map(lambda value: f"{float(value):.3f}")
-    return combined.loc[:, ["customer_id", "type", "score", "status"]].rename(columns={"customer_id": "id"}).to_dict(orient="records")
+    
+    # Gunakan safe_float agar map tidak error saat menemui NAType
+    combined["score"] = combined["ensemble_proba"].map(lambda v: f"{safe_float(v):.3f}")
+    
+    df_export = combined.loc[:, ["customer_id", "type", "score", "status"]].rename(columns={"customer_id": "id"})
+    
+    # 1. Bersihkan nilai NA/NaN agar tidak memicu error NAType / ValueError dari Pydantic
+    df_export = df_export.fillna("")
+    records = df_export.to_dict(orient="records")
+    
+    # 2. Paksa konversi semua kunci dictionary menjadi string
+    return [{str(k): v for k, v in record.items()} for record in records]
 
 def get_plan_summary() -> Dict[str, Any]:
     engine = load_engineered_df()
@@ -812,20 +829,18 @@ def api_customers(plan_type: Optional[str] = None, limit: int = 5000) -> Dict[st
     if limit is not None and limit > 0: df = df.head(limit)
     rows = []
     for _, row in df.iterrows():
-        rows.append({"customer_id": row.get("customer_id"), "plan_type": row.get("plan_type"), "contract_type": row.get("contract_type"), "status": "Churned" if int(row.get("churned", 0)) else "Not Churned"})
+        rows.append({"customer_id": row.get("customer_id"), "plan_type": row.get("plan_type"), "contract_type": row.get("contract_type"), "status": "Churned" if safe_int(row.get("churned", 0)) else "Not Churned"})
     return {"plan_type": normalize_plan(plan_type) if plan_type else None, "customers": rows}
 
 @app.get("/api/churn/analysis")
 def api_churn_analysis(plan_type: Optional[str] = None) -> Dict[str, Any]:
     predictions = load_prediction_results()
     
-    # Normalize plan names
     predictions["plan"] = predictions["plan"].astype(str).str.capitalize()
     available_plans = sorted(predictions["plan"].unique().tolist())
     
     plan = normalize_plan(plan_type) if plan_type else available_plans[0]
     
-    # Find plan_df, try multiple columns
     if "plan" in predictions.columns:
         plan_df = predictions[predictions["plan"].astype(str).str.capitalize() == plan].copy()
     elif "plan_type" in predictions.columns:
@@ -882,13 +897,13 @@ def api_customer_features(customer_id: str, plan_type: Optional[str] = None) -> 
     row = customer.iloc[0]
     selected_plan = normalize_plan(plan_type or str(row.get("plan_type", "")))
     return {
-        "customer_id": customer_id, "plan_type": selected_plan, "actual_status": int(row.get("churned", 0)), "actual_status_text": "YES (Churned)" if int(row.get("churned", 0)) else "NO (Retained)",
+        "customer_id": customer_id, "plan_type": selected_plan, "actual_status": safe_int(row.get("churned", 0)), "actual_status_text": "YES (Churned)" if safe_int(row.get("churned", 0)) else "NO (Retained)",
         "profile": {
-            "contract_type": row.get("contract_type", "N/A"), "annual_value": float(row.get("annual_value", 0)), "avg_monthly_usage_hours": float(row.get("avg_monthly_usage_hours", 0)),
-            "feature_adoption_pct_mean": float(row.get("feature_adoption_pct_mean", 0)), "days_since_last_login": float(row.get("days_since_last_login", 0)),
-            "total_tickets": float(row.get("total_tickets", 0)), "dunning_event_count": float(row.get("dunning_event_count", 0)), "critical_ticket_ratio": float(row.get("critical_ticket_ratio", 0)),
-            "payment_health_score": float(row.get("payment_health_score", 0)), "avg_nps_score": float(row.get("avg_nps_score", 0)), "payment_delay_days_mean": float(row.get("payment_delay_days_mean", 0)),
-            "revenue_at_risk": float(row.get("revenue_at_risk", 0)),
+            "contract_type": row.get("contract_type", "N/A"), "annual_value": safe_float(row.get("annual_value", 0)), "avg_monthly_usage_hours": safe_float(row.get("avg_monthly_usage_hours", 0)),
+            "feature_adoption_pct_mean": safe_float(row.get("feature_adoption_pct_mean", 0)), "days_since_last_login": safe_float(row.get("days_since_last_login", 0)),
+            "total_tickets": safe_float(row.get("total_tickets", 0)), "dunning_event_count": safe_float(row.get("dunning_event_count", 0)), "critical_ticket_ratio": safe_float(row.get("critical_ticket_ratio", 0)),
+            "payment_health_score": safe_float(row.get("payment_health_score", 0)), "avg_nps_score": safe_float(row.get("avg_nps_score", 0)), "payment_delay_days_mean": safe_float(row.get("payment_delay_days_mean", 0)),
+            "revenue_at_risk": safe_float(row.get("revenue_at_risk", 0)),
         },
     }
 
@@ -916,7 +931,7 @@ def api_predict_churn(payload: PredictRequest) -> Dict[str, Any]:
     elif "catboost" in preds: final_pred, model_name = preds["catboost"], "CatBoost"
     else: raise HTTPException(status_code=400, detail="No valid predictions could be generated")
 
-    actual_status = int(row.get("churned", 0))
+    actual_status = safe_int(row.get("churned", 0))
     predicted_churn = 1 if final_pred > payload.threshold else 0
     evaluation, explanation = evaluation_label(actual_status, predicted_churn)
     
@@ -925,13 +940,12 @@ def api_predict_churn(payload: PredictRequest) -> Dict[str, Any]:
         "risk_level": risk_label(final_pred), "actual_status": actual_status, "actual_status_text": "YES (Churned)" if actual_status else "NO (Retained)",
         "predicted_status": predicted_churn, "evaluation": evaluation, "explanation": explanation, "model_predictions": preds, "risk_factors": compute_risk_factors(row),
         "recommendation_actions": build_recommendation_actions(row, final_pred, evaluation),
-        "customer_profile": { "contract_type": row.get("contract_type", "N/A"), "annual_value": float(row.get("annual_value", 0)), "avg_nps_score": float(row.get("avg_nps_score", 0)), }
+        "customer_profile": { "contract_type": row.get("contract_type", "N/A"), "annual_value": safe_float(row.get("annual_value", 0)), "avg_nps_score": safe_float(row.get("avg_nps_score", 0)), }
     }
 
 @app.get("/api/sentiment/analysis")
 def api_sentiment_analysis() -> Dict[str, Any]:
     try:
-        # Jika API key tidak tersedia, gunakan dataset lokal sebagai fallback.
         if YOUTUBE_API_KEY:
             video_id = "MBRtCiE7-v8"
             max_comments = 2000
