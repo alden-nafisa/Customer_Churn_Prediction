@@ -136,7 +136,8 @@ def generate_summaries(df: pd.DataFrame, video_title: Optional[str] = None) -> D
     
     try:
         with st.spinner("✍️ Generating AI summaries..."):
-            engine = create_summarizer(use_cache=ENABLE_CACHING)
+            # FIX: Removed use_cache argument
+            engine = create_summarizer()
             
             # String casting if video_title is None
             video_title_str = str(video_title) if video_title is not None else ""

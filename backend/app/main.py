@@ -352,11 +352,13 @@ def generate_indobert_summary(df: pd.DataFrame) -> str:
         
         if pos_texts:
             combined_pos = " ".join(pos_texts)
-            pos_summary = summarizer_engine.summarize_text(combined_pos, max_length=100, min_length=30)
+            # FIX: Removed max_length and min_length arguments
+            pos_summary = summarizer_engine.summarize_text(combined_pos)
         
         if neg_texts:
             combined_neg = " ".join(neg_texts)
-            neg_summary = summarizer_engine.summarize_text(combined_neg, max_length=100, min_length=30)
+            # FIX: Removed max_length and min_length arguments
+            neg_summary = summarizer_engine.summarize_text(combined_neg)
         
         pos_count = len(pos_df)
         neg_count = len(neg_df)
