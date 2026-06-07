@@ -344,10 +344,11 @@ def render_top_churn_reasons(customer_data: pd.Series) -> None:
     reasons_df_sorted = reasons_df.sort_values("impact", ascending=True)
     
     # Create horizontal bar chart
-    fig = px.barh(
+    fig = px.bar(
         reasons_df_sorted,
         x="impact",
         y="factor",
+        orientation='h',
         color="direction",
         color_discrete_map={"push_up": "#FF4444", "pull_down": "#00CC44"},
         title="",
@@ -752,9 +753,10 @@ def render_dashboard_chart3_revenue_at_risk(
             "Professional": "#F97316",
             "Enterprise": "#EF4444",
         },
-        text_position="outside",
+        # Pylance Golden Rule: remove text_position from px.bar
     )
     
+    # Add textposition here
     fig.update_traces(texttemplate="$%{y:.1f}M", textposition="outside")
     fig.update_layout(height=400, showlegend=False)
     st.plotly_chart(fig, use_container_width=True)
@@ -781,16 +783,16 @@ def render_dashboard_chart4_top_drivers(
     drivers_df["Percentage"] = drivers_df["Count"] / len(high_churn) * 100
     drivers_df = drivers_df.sort_values("Count", ascending=True)
     
-    fig = px.barh(
+    fig = px.bar(
         drivers_df,
         x="Percentage",
         y="Factor",
+        orientation='h',
         title="Top Factors in High-Risk Customers",
         labels={"Percentage": "% of High-Risk Customers", "Factor": ""},
-        text_position="outside",
     )
     
-    fig.update_traces(marker_color="#FF4444", texttemplate="%{x:.0f}%")
+    fig.update_traces(marker_color="#FF4444", texttemplate="%{x:.0f}%", textposition="outside")
     fig.update_layout(height=350, margin=dict(l=200, r=50, t=80, b=50))
     st.plotly_chart(fig, use_container_width=True)
 

@@ -19,7 +19,7 @@ print("=" * 70)
 # Test 1: Import app
 print("\n[1/5] Testing app_lapisai imports...")
 try:
-    import app_lapisai
+    import app_lapisai_integrated
     print("✅ app_lapisai imported successfully")
 except Exception as e:
     print(f"❌ Failed to import app_lapisai: {e}")

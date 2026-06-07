@@ -11,6 +11,7 @@ from pathlib import Path
 from collections import Counter
 import re
 import math
+from typing import List, Tuple
 
 import joblib
 import pandas as pd
@@ -151,7 +152,7 @@ def train_sentiment_model(labeled_df: pd.DataFrame) -> tuple[Pipeline, dict, pd.
     return pipeline, metrics, test_predictions
 
 
-def extract_keywords(text: str, top_n: int = 10) -> list[str]:
+def extract_keywords(text: str, top_n: int = 10) -> List[Tuple[str, int]]:
     """Extract keywords from text."""
     cleaned = clean_text(text)
     tokens = cleaned.split()
