@@ -29,13 +29,11 @@ from googleapiclient.discovery import build
 
 # ========== LOCAL INDOBERT IMPORTS ==========
 import sys
-from pathlib import Path
-
-from summarization_engine import IndoBERTSummarizationEngine
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+    
 ENGINEERED_FEATURES_PATH = PROJECT_ROOT / "engineered_features" / "lapisai_engineered_features.csv"
 ENSEMBLE_PREDICTIONS_PATH = PROJECT_ROOT / "model_results" / "ensemble_predictions.csv"
 EVALUATION_METRICS_PATH = PROJECT_ROOT / "model_results" / "evaluation_metrics.csv"
@@ -43,6 +41,8 @@ PREPROCESSED_DIR = PROJECT_ROOT / "preprocessed_data"
 TRAINED_MODELS_DIR = PROJECT_ROOT / "trained_models" / "plan_specific"
 CHAT_DATA_PATH = PROJECT_ROOT / "youtube_chat_5_menit_cleaned.csv"
 NLP_ARTIFACTS_DIR = PROJECT_ROOT / "artifacts" / "nlp"
+
+from summarization_engine import IndoBERTSummarizationEngine
 
 FRONTEND_ORIGINS = [
     "http://localhost:3000",
@@ -244,7 +244,7 @@ def get_video_id(url: str) -> Optional[str]:
     match = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11}).*", url)
     return match.group(1) if match else None
 
-def scrape_youtube_comments(video_id: str, max_comments: int = 2000) -> List[Dict[str, Any]]:
+def scrape_youtube_comments(video_id: str, max_comments: int = 1500) -> List[Dict[str, Any]]:
     if not YOUTUBE_API_KEY:
         raise ValueError("YOUTUBE_API_KEY tidak ditemukan di .env")
         
@@ -261,11 +261,15 @@ def scrape_youtube_comments(video_id: str, max_comments: int = 2000) -> List[Dic
                     'author': snippet['authorDisplayName'],
                     'message': snippet['textDisplay']
                 })
-            if 'nextPageToken' in response:
+                # Hentikan seketika jika sudah mencapai target 1500
+                if len(comments) >= max_comments:
+                    break
+                    
+            if 'nextPageToken' in response and len(comments) < max_comments:
                 request = youtube.commentThreads().list(part="snippet", videoId=video_id, maxResults=100, textFormat="plainText", pageToken=response['nextPageToken'])
             else:
                 break
-        return comments
+        return comments[:max_comments]
     except Exception as e:
         raise ValueError(f"Gagal mengambil data dari YouTube API: {str(e)}")
 
@@ -344,20 +348,21 @@ def generate_indobert_summary(df: pd.DataFrame) -> str:
         pos_df = df[df['sentiment'] == 'Positive']
         neg_df = df[df['sentiment'] == 'Negative']
         
-        pos_texts = pos_df['message'].dropna().head(5).tolist()
-        neg_texts = neg_df['message'].dropna().head(5).tolist()
+        # PERBAIKAN MEMORI: Kurangi jumlah kalimat yang diambil dan potong karakternya
+        pos_texts = pos_df['message'].dropna().head(3).tolist()
+        neg_texts = neg_df['message'].dropna().head(3).tolist()
         
         pos_summary = ""
         neg_summary = ""
         
         if pos_texts:
-            combined_pos = " ".join(pos_texts)
-            # FIX: Removed max_length and min_length arguments
+            # Potong maksimal 100 karakter tiap kalimat agar tidak over-token
+            combined_pos = " ".join([str(t)[:100] for t in pos_texts])
             pos_summary = summarizer_engine.summarize_text(combined_pos)
         
         if neg_texts:
-            combined_neg = " ".join(neg_texts)
-            # FIX: Removed max_length and min_length arguments
+            # Potong maksimal 100 karakter tiap kalimat agar tidak over-token
+            combined_neg = " ".join([str(t)[:100] for t in neg_texts])
             neg_summary = summarizer_engine.summarize_text(combined_neg)
         
         pos_count = len(pos_df)
@@ -430,7 +435,8 @@ def create_sentiment_analysis_payload(df: pd.DataFrame) -> Dict[str, Any]:
     try:
         output_dir = PROJECT_ROOT / "artifacts" / "nlp"
         output_dir.mkdir(parents=True, exist_ok=True)
-        csv_path = output_dir / "gadgetin_2000_comments_analyzed.csv"
+        # Nama file CSV disesuaikan dengan 1500
+        csv_path = output_dir / "gadgetin_1500_comments_analyzed.csv"
         df.to_csv(csv_path, index=False)
         print(f"✅ Berhasil menyimpan {len(df)} komentar ke CSV: {csv_path}")
     except Exception as e:
@@ -586,10 +592,10 @@ def create_sentiment_analysis_payload_fast(df: pd.DataFrame) -> Dict[str, Any]:
         'trend_data': trend_data,
     }
 
-def load_local_sentiment_source(max_rows: int = 2000) -> pd.DataFrame:
+def load_local_sentiment_source(max_rows: int = 1500) -> pd.DataFrame:
     candidate_paths = [
         CHAT_DATA_PATH,
-        PROJECT_ROOT / "artifacts" / "nlp" / "gadgetin_2000_comments_analyzed.csv",
+        PROJECT_ROOT / "artifacts" / "nlp" / "gadgetin_1500_comments_analyzed.csv",
     ]
 
     for path in candidate_paths:
@@ -950,7 +956,7 @@ def api_sentiment_analysis() -> Dict[str, Any]:
     try:
         if YOUTUBE_API_KEY:
             video_id = "MBRtCiE7-v8"
-            max_comments = 2000
+            max_comments = 1500 # FIX: Diubah menjadi 1500 tepat
             raw_comments = scrape_youtube_comments(video_id, max_comments)
             if not raw_comments:
                 raise HTTPException(status_code=400, detail="Gagal mengambil komentar dari YouTube.")
@@ -959,7 +965,7 @@ def api_sentiment_analysis() -> Dict[str, Any]:
             payload["data_source"] = "youtube_api"
             return payload
         else:
-            df = load_local_sentiment_source(max_rows=2000)
+            df = load_local_sentiment_source(max_rows=1500) # FIX: Diubah menjadi 1500 tepat
             if df.empty:
                 raise HTTPException(status_code=400, detail="Tidak ada data sentimen lokal yang tersedia.")
             payload = create_sentiment_analysis_payload_fast(df)
@@ -974,9 +980,10 @@ def api_sentiment_analysis() -> Dict[str, Any]:
 
 @app.get("/api/sentiment/export")
 def api_sentiment_export():
-    file_path = NLP_ARTIFACTS_DIR / "gadgetin_2000_comments_analyzed.csv"
+    # FIX: Export filename matching the 1500 limit
+    file_path = NLP_ARTIFACTS_DIR / "gadgetin_1500_comments_analyzed.csv"
     if file_path.exists():
-        return FileResponse(path=file_path, filename="gadgetin_2000_comments_analyzed.csv", media_type="text/csv")
+        return FileResponse(path=file_path, filename="gadgetin_1500_comments_analyzed.csv", media_type="text/csv")
     raise HTTPException(status_code=404, detail="File CSV belum tersedia. Silakan jalankan analisis terlebih dahulu.")
 
 @app.post("/api/sentiment/manual")

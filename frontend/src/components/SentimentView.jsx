@@ -126,7 +126,7 @@ export default function SentimentView() {
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 mb-6">
         <div className="flex items-center gap-2 mb-2">
           <Search size={18} className="text-indigo-500" />
-          <h2 className="text-[14px] font-black text-slate-800 tracking-wider uppercase">Live YouTube Scraper (Target: 2000 Komentar)</h2>
+          <h2 className="text-[14px] font-black text-slate-800 tracking-wider uppercase">Live YouTube Scraper (Target: 1500 Komentar)</h2>
         </div>
         <p className="text-sm text-slate-500 mb-4">Sistem akan melakukan <strong>scraping</strong> pada komentar terbaru dari video <strong>"Laptop murah bagus justru dari Apple - Macbook Neo" (GadgetIn)</strong>, menganalisis dengan IndoBERT, dan mengekspor hasilnya ke format CSV di backend.</p>
         
@@ -181,7 +181,7 @@ export default function SentimentView() {
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
             <div className="flex items-center gap-2 mb-4 pb-4 border-b border-slate-100">
               <Sparkles size={18} className="text-indigo-500" />
-              <h2 className="text-[14px] font-black text-slate-800 tracking-wider uppercase">AI Executive Summary</h2>
+              <h2 className="text-[14px] font-black text-slate-800 tracking-wider uppercase">Local Executive Summary</h2>
             </div>
             
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
