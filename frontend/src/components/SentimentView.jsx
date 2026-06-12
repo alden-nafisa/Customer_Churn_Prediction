@@ -139,7 +139,7 @@ export default function SentimentView() {
             disabled={loading}
             className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-xl transition-colors whitespace-nowrap disabled:opacity-70 flex items-center justify-center gap-2"
           >
-            {loading ? "Scraping & Memproses 2000 Data (Bisa memakan waktu 1-3 Menit)..." : "🚀 Mulai Scrape & Analisis 2000 Komentar"}
+            {loading ? "Scraping & Memproses 1500 Data (Bisa memakan waktu 1-3 Menit)..." : "🚀 Mulai Scrape & Analisis 2000 Komentar"}
           </button>
 
           {!loading && analysisData && (
