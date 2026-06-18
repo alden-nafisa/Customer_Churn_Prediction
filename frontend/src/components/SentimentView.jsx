@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Search, Sparkles, Quote, Database, TrendingUp, BrainCircuit, MessageCircle, Info, MessageSquare, Download } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 
+const API_BASE_URL = 'http://127.0.0.1:8000';
+
 export default function SentimentView() {
   const [analysisData, setAnalysisData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -12,13 +14,12 @@ export default function SentimentView() {
   const [manualLoading, setManualLoading] = useState(false);
 
   useEffect(() => {
-    // Mengecek apakah ada data yang tersimpan di memori browser (Local Storage)
     const cachedData = localStorage.getItem('lapisai_sentiment_data');
     if (cachedData) {
       setAnalysisData(JSON.parse(cachedData));
-      setLoading(false); // Langsung tampilkan tanpa loading ulang
+      setLoading(false);
     } else {
-      fetchData(); // Jika kosong, baru fetch dari backend
+      fetchData();
     }
   }, []);
 
@@ -26,7 +27,7 @@ export default function SentimentView() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/sentiment/analysis');
+      const res = await fetch(`${API_BASE_URL}/api/sentiment/analysis`);
       if (!res.ok) {
         const errorData = await res.json();
         throw new Error(errorData.detail || 'Gagal mengambil data dari backend Python.');
@@ -34,7 +35,6 @@ export default function SentimentView() {
       
       const data = await res.json();
       setAnalysisData(data);
-      // Simpan hasil sukses ke dalam memori browser agar bertahan saat pindah halaman
       localStorage.setItem('lapisai_sentiment_data', JSON.stringify(data));
     } catch (err) {
       setError(err.message);
@@ -44,7 +44,7 @@ export default function SentimentView() {
   };
 
   const handleExport = () => {
-    window.open('/api/sentiment/export', '_blank');
+    window.open(`${API_BASE_URL}/api/sentiment/export`, '_blank');
   };
 
   const handleManualTest = async () => {
@@ -52,7 +52,7 @@ export default function SentimentView() {
     setManualLoading(true);
     setManualResult(null);
     try {
-      const res = await fetch('/api/sentiment/manual', {
+      const res = await fetch(`${API_BASE_URL}/api/sentiment/manual`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: manualText }),
@@ -82,7 +82,6 @@ export default function SentimentView() {
     'Neutral': { name: 'Netral', color: 'bg-slate-400' }
   };
 
-  // Safe percentage calculation math (Mencegah error 684%)
   const total = analysisData?.total_feedback || 1;
   const neuCount = analysisData?.sentiment_distribution?.neutral ?? 0;
   const negCount = analysisData?.sentiment_distribution?.negative ?? 0;
@@ -92,7 +91,6 @@ export default function SentimentView() {
   const negPct = Math.round((negCount / total) * 100);
   const posPct = Math.round((posCount / total) * 100);
 
-  // Custom Hover Tooltip untuk Grafik Trend Recharts
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
       return (
@@ -114,7 +112,6 @@ export default function SentimentView() {
   return (
     <div className="max-w-6xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20 relative">
       
-      {/* HEADER */}
       <div className="flex items-center gap-3 mb-6">
         <div className="p-1.5 bg-white border border-slate-200 text-slate-500 rounded-md shadow-sm">
           <MessageSquare size={18} />
@@ -122,30 +119,29 @@ export default function SentimentView() {
         <h1 className="text-xl font-black text-slate-800 tracking-tight">Feedback & Sentiment Intelligence</h1>
       </div>
 
-      {/* YOUTUBE TRIGGER & EXPORT */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 mb-6">
         <div className="flex items-center gap-2 mb-2">
           <Search size={18} className="text-indigo-500" />
           <h2 className="text-[14px] font-black text-slate-800 tracking-wider uppercase">Live YouTube Scraper (Target: 1500 Komentar)</h2>
         </div>
-        <p className="text-sm text-slate-500 mb-4">Sistem akan melakukan <strong>scraping</strong> pada komentar terbaru dari video <strong>"Laptop murah bagus justru dari Apple - Macbook Neo" (GadgetIn)</strong>, menganalisis dengan IndoBERT, dan mengekspor hasilnya ke format CSV di backend.</p>
+        <p className="text-sm text-slate-500 mb-4">Sistem akan melakukan <strong>scraping</strong> pada komentar terbaru dari video GadgetIn, menganalisis dengan IndoBERT lokal, mengekstrak Skor Confidence, dan mengekspor hasilnya ke format CSV di backend.</p>
         
         <div className="flex flex-col md:flex-row gap-4">
           <button 
             onClick={() => {
-              localStorage.removeItem('lapisai_sentiment_data'); // Hapus cache lama
-              fetchData(); // Paksa fetch data baru
+              localStorage.removeItem('lapisai_sentiment_data');
+              fetchData();
             }}
             disabled={loading}
-            className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-xl transition-colors whitespace-nowrap disabled:opacity-70 flex items-center justify-center gap-2"
+            className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-xl transition-colors whitespace-nowrap disabled:opacity-70 flex items-center justify-center gap-2 shadow-md shadow-indigo-200"
           >
-            {loading ? "Scraping & Memproses 1500 Data (Bisa memakan waktu 1-3 Menit)..." : "🚀 Mulai Scrape & Analisis 2000 Komentar"}
+            {loading ? "Scraping & Memproses 1500 Data (Bisa memakan waktu 1-3 Menit)..." : "🚀 Mulai Scrape & Analisis 1500 Komentar"}
           </button>
 
           {!loading && analysisData && (
              <button 
                onClick={handleExport}
-               className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-xl transition-colors whitespace-nowrap flex items-center justify-center gap-2"
+               className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-xl transition-colors whitespace-nowrap flex items-center justify-center gap-2 shadow-md shadow-emerald-200"
              >
                <Download size={18} /> Export CSV Hasil Analisis
              </button>
@@ -153,7 +149,6 @@ export default function SentimentView() {
         </div>
       </div>
 
-      {/* ERROR HANDLER */}
       {error && (
         <div className="bg-rose-50 border border-rose-200 text-rose-700 px-6 py-4 rounded-xl flex items-start gap-3 mb-6">
           <Info size={20} className="shrink-0 mt-0.5" />
@@ -164,16 +159,14 @@ export default function SentimentView() {
         </div>
       )}
 
-      {/* LOADING STATE */}
       {loading && !analysisData && (
         <div className="flex flex-col items-center justify-center py-20 bg-white rounded-2xl border border-slate-200 shadow-sm">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mb-4"></div>
           <h2 className="text-xl font-bold text-slate-700">Menganalisis dengan IndoBERT...</h2>
-          <p className="text-slate-500 mt-2">Memproses ribuan baris teks mungkin memakan waktu 1-3 menit.</p>
+          <p className="text-slate-500 mt-2">Memproses ribuan baris teks secara lokal mungkin memakan waktu 1-3 menit.</p>
         </div>
       )}
 
-      {/* MAIN CONTENT RENDERING */}
       {(!loading || analysisData) && analysisData && (
         <div className="space-y-6">
           
@@ -209,7 +202,8 @@ export default function SentimentView() {
                       <div>
                         <p className="text-[12px] font-medium text-slate-700">"{item.message}"</p>
                         <span className={`text-[9px] font-bold ${colors.text} mt-1 block`}>
-                          {item.sentiment === 'Neutral' ? 'Netral' : item.sentiment} • {emotionTranslation[item.emotion]?.name || item.emotion} • {item.author}
+                          {item.sentiment === 'Neutral' ? 'Netral' : item.sentiment} 
+                          {item.confidence && ` (${item.confidence}%)`} • {emotionTranslation[item.emotion]?.name || item.emotion} • {item.author}
                         </span>
                       </div>
                     </div>
@@ -322,20 +316,36 @@ export default function SentimentView() {
             </div>
           </div>
 
+          {/* SECTION MANUAL TEST DENGAN XAI */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-            <h3 className="text-sm font-black text-slate-800 mb-4 flex items-center gap-2"><BrainCircuit size={16} className="text-indigo-600" /> Uji Sentimen Manual</h3>
+            <h3 className="text-sm font-black text-slate-800 mb-4 flex items-center gap-2"><BrainCircuit size={16} className="text-indigo-600" /> Uji Sentimen Manual (Explainable NLP)</h3>
             <div className="flex gap-4">
               <textarea className="w-full h-24 p-3 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none resize-none" placeholder="Ketik kalimat apapun di sini, AI akan membedah sentimennya..." value={manualText} onChange={(e) => setManualText(e.target.value)} />
-              <button onClick={handleManualTest} disabled={manualLoading || !manualText} className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded-lg font-bold text-sm transition-colors disabled:opacity-50 flex items-center justify-center min-w-[120px]">
+              <button onClick={handleManualTest} disabled={manualLoading || !manualText} className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded-lg font-bold text-sm transition-colors disabled:opacity-50 flex items-center justify-center min-w-[120px] shadow-md shadow-indigo-200">
                 {manualLoading ? <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div> : 'Analisis Teks'}
               </button>
             </div>
+            
             {manualResult && (
-              <div className={`mt-4 p-4 rounded-xl flex items-center gap-3 font-bold text-sm border ${manualResult.sentiment === 'Positive' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : manualResult.sentiment === 'Negative' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-slate-100 text-slate-700 border-slate-200'}`}>
-                <div className="text-2xl">{manualResult.sentiment === 'Positive' ? '✅' : manualResult.sentiment === 'Negative' ? '🚨' : 'ℹ️'}</div>
-                <div>
-                  <div>Sentimen: <span className="uppercase tracking-widest">{manualResult.sentiment === 'Neutral' ? 'Netral' : manualResult.sentiment}</span></div>
-                  <div className="text-xs opacity-75 mt-1 font-medium">Emosi Terdeteksi: {emotionTranslation[manualResult.emotion]?.name || manualResult.emotion}</div>
+              <div className={`mt-4 p-4 rounded-xl flex items-start gap-4 font-bold text-sm border ${manualResult.sentiment === 'Positive' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : manualResult.sentiment === 'Negative' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-slate-100 text-slate-700 border-slate-200'}`}>
+                <div className="text-3xl mt-0.5">{manualResult.sentiment === 'Positive' ? '✅' : manualResult.sentiment === 'Negative' ? '🚨' : 'ℹ️'}</div>
+                <div className="flex-1">
+                  <div className="flex items-center gap-3">
+                    <div className="text-base">Sentimen: <span className="uppercase tracking-widest">{manualResult.sentiment === 'Neutral' ? 'Netral' : manualResult.sentiment}</span></div>
+                    {manualResult.confidence && (
+                      <span className="text-[10px] font-bold bg-white/60 px-2 py-0.5 rounded-md border border-current opacity-80 uppercase tracking-wide">
+                        Akurasi: {manualResult.confidence}%
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[11px] opacity-75 mt-1 font-medium">Emosi Terdeteksi: {emotionTranslation[manualResult.emotion]?.name || manualResult.emotion}</div>
+                  
+                  {manualResult.xai && (
+                    <div className="mt-4 pt-3 border-t border-current border-opacity-10">
+                      <div className="text-[10px] uppercase tracking-wider mb-1 opacity-70">Penjelasan AI (XAI)</div>
+                      <div className="text-xs font-medium leading-relaxed opacity-90">{manualResult.xai.reasoning}</div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -348,7 +358,7 @@ export default function SentimentView() {
             <div className="overflow-x-auto max-h-[500px]">
               <table className="w-full text-left text-[12px]">
                 <thead className="bg-white border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider text-[10px] sticky top-0">
-                  <tr><th className="px-5 py-4 whitespace-nowrap">Time</th><th className="px-5 py-4 whitespace-nowrap">Author</th><th className="px-5 py-4 w-1/2">Message</th><th className="px-5 py-4 whitespace-nowrap text-center">Sentiment</th><th className="px-5 py-4 whitespace-nowrap text-center">Detected Emotion</th></tr>
+                  <tr><th className="px-5 py-4 whitespace-nowrap">Time</th><th className="px-5 py-4 whitespace-nowrap">Author</th><th className="px-5 py-4 w-1/2">Message</th><th className="px-5 py-4 whitespace-nowrap text-center">Sentiment (Akurasi)</th><th className="px-5 py-4 whitespace-nowrap text-center">Detected Emotion</th></tr>
                 </thead>
                 <tbody>
                   {analysisData.raw_feedback && analysisData.raw_feedback.map((row, i) => {
@@ -364,9 +374,10 @@ export default function SentimentView() {
                         <td className="px-5 py-4 font-bold text-indigo-600 whitespace-nowrap truncate max-w-[120px]">{row.author}</td>
                         <td className="px-5 py-4 font-medium text-slate-700 leading-relaxed pr-8">{row.message}</td>
                         <td className="px-5 py-4 text-center whitespace-nowrap">
-                          <span className={`px-3 py-1 rounded-md text-[10px] font-bold border shadow-sm ${badgeColor}`}>
-                            {row.sentiment === 'Neutral' ? 'Netral' : row.sentiment}
-                          </span>
+                          <div className={`inline-flex flex-col items-center px-3 py-1.5 rounded-md border shadow-sm ${badgeColor}`}>
+                            <span className="text-[10px] font-bold uppercase">{row.sentiment === 'Neutral' ? 'Netral' : row.sentiment}</span>
+                            {row.confidence && <span className="text-[9px] opacity-75">{row.confidence}%</span>}
+                          </div>
                         </td>
                         <td className="px-5 py-4 text-center whitespace-nowrap">
                           <span className={`text-[11px] font-bold px-2.5 py-1 rounded border ${emotionInfo.color.replace('bg-', 'bg-opacity-20 text-').replace('400', '700').replace('500', '700')} border-opacity-30`}>

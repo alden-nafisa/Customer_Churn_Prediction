@@ -10,7 +10,7 @@ import time
 from collections import Counter
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -64,7 +64,6 @@ app.add_middleware(
 load_dotenv()
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 
-# Initialize local IndoBERT summarizer (no external APIs needed)
 print("🚀 Initializing local IndoBERT summarization engine...")
 try:
     summarizer_engine = IndoBERTSummarizationEngine()
@@ -92,60 +91,44 @@ class ManualSentimentRequest(BaseModel):
 # ==============================================================================
 
 def safe_float(val: Any, default: float = 0.0) -> float:
-    """Safe cast to float avoiding NAType errors from pandas."""
-    if pd.isna(val):
-        return default
-    try:
-        return float(val) # type: ignore
-    except (ValueError, TypeError):
-        return default
+    if pd.isna(val): return default
+    try: return float(val)
+    except (ValueError, TypeError): return default
 
 def safe_int(val: Any, default: int = 0) -> int:
-    """Safe cast to int avoiding NAType errors from pandas."""
-    if pd.isna(val):
-        return default
-    try:
-        return int(float(val)) # type: ignore
-    except (ValueError, TypeError):
-        return default
+    if pd.isna(val): return default
+    try: return int(float(val))
+    except (ValueError, TypeError): return default
 
 def _read_csv(path: Path) -> pd.DataFrame:
-    if not path.exists():
-        raise FileNotFoundError(str(path))
+    if not path.exists(): raise FileNotFoundError(str(path))
     return pd.read_csv(path)
 
 @lru_cache(maxsize=1)
-def load_engineered_df() -> pd.DataFrame:
-    return _read_csv(ENGINEERED_FEATURES_PATH)
+def load_engineered_df() -> pd.DataFrame: return _read_csv(ENGINEERED_FEATURES_PATH)
 
 @lru_cache(maxsize=1)
-def load_ensemble_df() -> pd.DataFrame:
-    return _read_csv(ENSEMBLE_PREDICTIONS_PATH)
+def load_ensemble_df() -> pd.DataFrame: return _read_csv(ENSEMBLE_PREDICTIONS_PATH)
 
 @lru_cache(maxsize=1)
-def load_eval_df() -> pd.DataFrame:
-    return _read_csv(EVALUATION_METRICS_PATH)
+def load_eval_df() -> pd.DataFrame: return _read_csv(EVALUATION_METRICS_PATH)
 
 @lru_cache(maxsize=1)
 def load_chat_df() -> pd.DataFrame:
-    if not CHAT_DATA_PATH.exists():
-        return pd.DataFrame(columns=['time', 'author', 'message'])
+    if not CHAT_DATA_PATH.exists(): return pd.DataFrame(columns=['time', 'author', 'message'])
     return _read_csv(CHAT_DATA_PATH)
 
 @lru_cache(maxsize=1)
 def load_prediction_results() -> pd.DataFrame:
     engineered = load_engineered_df().reset_index(drop=True)
     results_path = PROJECT_ROOT / "model_results" / "final_predictions.csv"
-    if results_path.exists():
-        results = _read_csv(results_path).reset_index(drop=True)
-    else:
-        results = load_ensemble_df().reset_index(drop=True)
+    if results_path.exists(): results = _read_csv(results_path).reset_index(drop=True)
+    else: results = load_ensemble_df().reset_index(drop=True)
 
     limit = min(len(engineered), len(results))
     engineered_subset = engineered.iloc[:limit].copy()
     results_subset = results.iloc[:limit].copy()
     
-    # Merge dengan suffix untuk menghindari conflict
     merged = pd.concat([engineered_subset, results_subset], axis=1)
 
     merged["customer_id"] = merged["customer_id"].astype(str)
@@ -160,18 +143,13 @@ def load_prediction_results() -> pd.DataFrame:
     merged["ensemble_proba"] = merged[proba_col].astype(float)
     merged["ensemble_prediction"] = merged[pred_col].astype(int)
     
-    # Ensure xgb_proba and cat_proba exist
     if "xgb_proba" not in merged.columns:
-        if "xgb_probability" in merged.columns:
-            merged["xgb_proba"] = merged["xgb_probability"].astype(float)
-        else:
-            merged["xgb_proba"] = merged["ensemble_proba"]
+        if "xgb_probability" in merged.columns: merged["xgb_proba"] = merged["xgb_probability"].astype(float)
+        else: merged["xgb_proba"] = merged["ensemble_proba"]
         
     if "cat_proba" not in merged.columns:
-        if "cat_probability" in merged.columns:
-            merged["cat_proba"] = merged["cat_probability"].astype(float)
-        else:
-            merged["cat_proba"] = merged["ensemble_proba"]
+        if "cat_probability" in merged.columns: merged["cat_proba"] = merged["cat_probability"].astype(float)
+        else: merged["cat_proba"] = merged["ensemble_proba"]
     else:
         merged["cat_proba"] = merged["cat_proba"].astype(float)
         
@@ -184,8 +162,7 @@ def load_preprocessing_info() -> Dict[str, List[str]]:
     info: Dict[str, List[str]] = {}
     for plan in ("starter", "professional", "enterprise"):
         info_path = PREPROCESSED_DIR / f"{plan}_preprocessing_info.json"
-        if not info_path.exists():
-            continue
+        if not info_path.exists(): continue
         data = json.loads(info_path.read_text(encoding="utf-8"))
         features = ast.literal_eval(data.get("features_selected", "[]"))
         info[plan.capitalize()] = [str(x) for x in features]
@@ -208,10 +185,9 @@ def load_models(plan_type: str) -> Dict[str, Any]:
 
 @lru_cache(maxsize=1)
 def get_nlp_components():
-    """Load IndoBERT model and stopwords (Cached in memory for API speed)"""
     print("Membaca model IndoBERT ke dalam memori...")
     indobert = pipeline(
-        "sentiment-analysis", # type: ignore
+        "sentiment-analysis", 
         model="mdhugol/indonesia-bert-sentiment-classification",
         tokenizer="mdhugol/indonesia-bert-sentiment-classification"
     )
@@ -223,17 +199,17 @@ def get_nlp_components():
     except Exception:
         stop_words_eng = {'a', 'about', 'above', 'after', 'again', 'against', 'all', 'am', 'an', 'and'}
 
-    # Menambahkan artefak demojize (Face, Tears, Joy) agar dibuang dari analisis Keyword
     stop_words_eng.update({'face', 'tears', 'joy', 'with', 'smiling', 'sweat', 'loudly', 'crying', 'rolling', 'eyes', 'heavy', 'heart', 'hands', 'folded', 'fire'})
 
+    # FIX PENTING: MENGELUARKAN KATA NEGASI (tidak, bukan, dll) DARI DAFTAR STOPWORDS
     stop_words_indo = {
         'yg', 'di', 'ke', 'dari', 'ini', 'itu', 'dan', 'atau', 'tapi', 'yang', 'buat', 'sama', 'kok', 'sih', 'nya', 'aja', 'kalo', 
-        'udah', 'gak', 'ga', 'ada', 'untuk', 'dengan', 'dalam', 'pada', 'juga', 'sudah', 'saya', 'dia', 'mereka', 'kita', 'kami',
-        'kamu', 'aku', 'bisa', 'tidak', 'ya', 'yaudah', 'saja', 'belum', 'kalau', 'jadi', 'lagi', 'terus', 'biar', 'pas', 'kan',
+        'udah', 'ada', 'untuk', 'dengan', 'dalam', 'pada', 'juga', 'sudah', 'saya', 'dia', 'mereka', 'kita', 'kami',
+        'kamu', 'aku', 'bisa', 'ya', 'yaudah', 'saja', 'kalau', 'jadi', 'lagi', 'terus', 'biar', 'pas', 'kan',
         'lebih', 'paling', 'baru', 'sekarang', 'banyak', 'sangat', 'sekali', 'memang', 'pasti', 'karena', 'seperti', 'apa', 'siapa',
         'bagaimana', 'kenapa', 'kapan', 'dimana', 'mana', 'dong', 'deh', 'lah', 'pun', 'gini', 'gitu', 'begini', 'begitu',
         'mah', 'nah', 'loh', 'nih', 'tuh', 'eh', 'oh', 'ah', 'ih', 'uh', 'bgt', 'banget', 'gw', 'gua', 'lu', 'lo', 'emang',
-        'dgn', 'klo', 'karna', 'krn', 'jd', 'jgn', 'jangan', 'bkn', 'bukan', 'bs', 'tp', 'dpt', 'dapet', 'org', 'orang', 'gk', 'tetap'
+        'dgn', 'klo', 'karna', 'krn', 'jd', 'bs', 'tp', 'dpt', 'dapet', 'org', 'orang', 'tetap'
     }
     context_noise = {'video', 'youtube', 'apple', 'macbook', 'neo', 'laptop', 'david', 'gadgetin', 'bang', 'review', 'hp', 'handphone', 'smartphone'}
     all_stopwords = stop_words_eng.union(stop_words_indo).union(context_noise)
@@ -245,8 +221,7 @@ def get_video_id(url: str) -> Optional[str]:
     return match.group(1) if match else None
 
 def scrape_youtube_comments(video_id: str, max_comments: int = 1500) -> List[Dict[str, Any]]:
-    if not YOUTUBE_API_KEY:
-        raise ValueError("YOUTUBE_API_KEY tidak ditemukan di .env")
+    if not YOUTUBE_API_KEY: raise ValueError("YOUTUBE_API_KEY tidak ditemukan di .env")
         
     youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
     comments = []
@@ -261,22 +236,18 @@ def scrape_youtube_comments(video_id: str, max_comments: int = 1500) -> List[Dic
                     'author': snippet['authorDisplayName'],
                     'message': snippet['textDisplay']
                 })
-                # Hentikan seketika jika sudah mencapai target 1500
-                if len(comments) >= max_comments:
-                    break
+                if len(comments) >= max_comments: break
                     
             if 'nextPageToken' in response and len(comments) < max_comments:
                 request = youtube.commentThreads().list(part="snippet", videoId=video_id, maxResults=100, textFormat="plainText", pageToken=response['nextPageToken'])
-            else:
-                break
+            else: break
         return comments[:max_comments]
     except Exception as e:
         raise ValueError(f"Gagal mengambil data dari YouTube API: {str(e)}")
 
 def clean_text(text: str, stopwords_set: set) -> str:
     if not isinstance(text, str): return ""
-    if hasattr(emoji, 'replace_emoji'):
-        text = emoji.replace_emoji(text, replace='')
+    if hasattr(emoji, 'replace_emoji'): text = emoji.replace_emoji(text, replace='')
     else:
         text = emoji.demojize(text)
         text = re.sub(r':[a-zA-Z_]+:', '', text)
@@ -285,28 +256,29 @@ def clean_text(text: str, stopwords_set: set) -> str:
     text = re.sub(r'http\S+|www\S+|\@\w+|\#\w+', ' ', text)
     text = text.translate(str.maketrans(string.punctuation, ' ' * len(string.punctuation)))
     tokens = text.split()
+    # Hanya hapus stop words, pertahankan kata seperti 'tidak', 'kurang', dll
     return " ".join([w for w in tokens if w not in stopwords_set and len(w) > 2])
 
-def classify_sentiment(raw_text: str, model, stopwords_set) -> str:
+def classify_sentiment(raw_text: str, model, stopwords_set) -> Tuple[str, float]:
     cleaned_text = clean_text(raw_text, stopwords_set)
     try:
         result = model(cleaned_text[:512])[0]
-        if result['label'] == "LABEL_0": return "Positive"
-        elif result['label'] == "LABEL_1": return "Neutral"
-        else: return "Negative"
+        score = float(result['score'])
+        if result['label'] == "LABEL_0": return "Positive", score
+        elif result['label'] == "LABEL_1": return "Neutral", score
+        else: return "Negative", score
     except Exception:
-        return "Neutral"
+        return "Neutral", 0.0
 
-def classify_sentiment_rule_based(raw_text: str) -> str:
+def classify_sentiment_rule_based(raw_text: str) -> Tuple[str, float]:
     text = clean_text(raw_text, set())
-    positive_hints = {'bagus', 'mantap', 'keren', 'suka', 'senang', 'terbaik', 'hebat', 'puas', 'helpful', 'mantul', 'gooo', 'asik'}
-    negative_hints = {'buruk', 'jelek', 'kecewa', 'lambat', 'parah', 'gagal', 'benci', 'marah', 'susah', 'ribet', 'spam', 'lemot'}
+    positive_hints = {'bagus', 'mantap', 'keren', 'suka', 'senang', 'terbaik', 'hebat', 'puas', 'helpful', 'mantul', 'gooo', 'asik', 'baik'}
+    negative_hints = {'buruk', 'jelek', 'kecewa', 'lambat', 'parah', 'gagal', 'benci', 'marah', 'susah', 'ribet', 'spam', 'lemot', 'tidak', 'kurang'}
     tokens = set(text.split())
-    if tokens & negative_hints:
-        return 'Negative'
-    if tokens & positive_hints:
-        return 'Positive'
-    return 'Neutral'
+    
+    if tokens & negative_hints: return 'Negative', 0.85
+    if tokens & positive_hints: return 'Positive', 0.85
+    return 'Neutral', 0.50
 
 EMOTION_KEYWORDS = {
     'Annoyance': ['marah', 'kesal', 'jengkel', 'annoy', 'ngambek', 'risih', 'benci', 'jelek', 'buruk', 'gagal', 'mahal', 'overpriced', 'scam', 'lemot', 'parah', 'males', 'nyebelin', 'kecewa', 'sampah'],
@@ -316,12 +288,54 @@ EMOTION_KEYWORDS = {
 
 def infer_sentiment_emotion(text: str, sentiment: str) -> str:
     normalized = text.lower()
+    
+    # Filter emosi yang valid berdasarkan sentimen utama dari IndoBERT
+    # Agar kata "suka" dalam kalimat negatif ("tidak suka") tidak memicu emosi "Senang"
+    valid_emotions = []
+    if sentiment == 'Negative':
+        valid_emotions = ['Annoyance', 'Sadness']
+    elif sentiment == 'Positive':
+        valid_emotions = ['Excitement']
+        
     for emotion, terms in EMOTION_KEYWORDS.items():
-        if any(term in normalized for term in terms):
-            return emotion
+        if emotion in valid_emotions:
+            if any(term in normalized for term in terms):
+                return emotion
+                
+    # Fallback jika tidak ada kata kunci emosi yang cocok
     if sentiment == 'Negative': return 'Annoyance'
     if sentiment == 'Positive': return 'Excitement'
     return 'Neutral'
+
+# ==================== NLP XAI (Explainable AI) ====================
+def explain_sentiment_xai(text: str) -> Dict[str, Any]:
+    cleaned = clean_text(text, set()) 
+    tokens = set(cleaned.split())
+    
+    positive_hints = {'bagus', 'mantap', 'keren', 'suka', 'senang', 'terbaik', 'hebat', 'puas', 'helpful', 'mantul', 'asik', 'baik'}
+    negative_hints = {'buruk', 'jelek', 'kecewa', 'lambat', 'parah', 'gagal', 'benci', 'marah', 'susah', 'ribet', 'lemot', 'sampah', 'mahal'}
+    negation_hints = {'tidak', 'bukan', 'belum', 'jangan', 'gak', 'ga', 'bkn', 'gk', 'kurang'}
+    
+    found_pos = list(tokens & positive_hints)
+    found_neg = list(tokens & negative_hints)
+    found_negation = list(tokens & negation_hints)
+    
+    if found_negation:
+        reasoning = f"⚠️ Terdapat pembalikan makna (Negasi): kata '{', '.join(found_negation)}' terdeteksi, yang mengubah orientasi sentimen kalimat asli."
+    elif found_pos:
+        reasoning = f"✅ Terdeteksi sinyal positif kuat dari leksikal: {', '.join(found_pos)}."
+    elif found_neg:
+        reasoning = f"🚨 Terdeteksi sinyal negatif kuat dari leksikal: {', '.join(found_neg)}."
+    else:
+        reasoning = "🤖 Sentimen disimpulkan murni berdasarkan pemahaman konteks laten oleh arsitektur IndoBERT."
+        
+    return {
+        "positive_words": found_pos,
+        "negative_words": found_neg,
+        "negation_words": found_negation,
+        "reasoning": reasoning
+    }
+# ==================================================================
 
 def build_sentiment_keywords(messages: pd.Series, stopwords_set: set, top_n: int = 7) -> List[Dict[str, Any]]:
     counter = Counter()
@@ -342,32 +356,25 @@ def build_sentiment_keywords(messages: pd.Series, stopwords_set: set, top_n: int
     return results
 
 def generate_indobert_summary(df: pd.DataFrame) -> str:
-    if not summarizer_engine:
-        return "" 
+    if not summarizer_engine: return "" 
     try:
         pos_df = df[df['sentiment'] == 'Positive']
         neg_df = df[df['sentiment'] == 'Negative']
         
-        # PERBAIKAN MEMORI: Kurangi jumlah kalimat yang diambil dan potong karakternya
         pos_texts = pos_df['message'].dropna().head(3).tolist()
         neg_texts = neg_df['message'].dropna().head(3).tolist()
         
-        pos_summary = ""
-        neg_summary = ""
+        pos_summary, neg_summary = "", ""
         
         if pos_texts:
-            # Potong maksimal 100 karakter tiap kalimat agar tidak over-token
             combined_pos = " ".join([str(t)[:100] for t in pos_texts])
             pos_summary = summarizer_engine.summarize_text(combined_pos)
         
         if neg_texts:
-            # Potong maksimal 100 karakter tiap kalimat agar tidak over-token
             combined_neg = " ".join([str(t)[:100] for t in neg_texts])
             neg_summary = summarizer_engine.summarize_text(combined_neg)
         
-        pos_count = len(pos_df)
-        neg_count = len(neg_df)
-        total = len(df)
+        pos_count, neg_count, total = len(pos_df), len(neg_df), len(df)
         
         summary = f"""
 📊 **Ringkasan Analisis Sentimen (IndoBERT Local Processing)**
@@ -423,19 +430,22 @@ def create_sentiment_analysis_payload(df: pd.DataFrame) -> Dict[str, Any]:
     
     sentiments = []
     emotions = []
+    confidences = []
+    
     for msg in df['message']:
-        sentiment = classify_sentiment(msg, indobert, all_stopwords)
+        sentiment, score = classify_sentiment(msg, indobert, all_stopwords)
         emotion = infer_sentiment_emotion(msg, sentiment)
         sentiments.append(sentiment)
         emotions.append(emotion)
+        confidences.append(round(score * 100, 2))
         
     df['sentiment'] = sentiments
     df['emotion'] = emotions
+    df['confidence'] = confidences
 
     try:
         output_dir = PROJECT_ROOT / "artifacts" / "nlp"
         output_dir.mkdir(parents=True, exist_ok=True)
-        # Nama file CSV disesuaikan dengan 1500
         csv_path = output_dir / "gadgetin_1500_comments_analyzed.csv"
         df.to_csv(csv_path, index=False)
         print(f"✅ Berhasil menyimpan {len(df)} komentar ke CSV: {csv_path}")
@@ -443,20 +453,15 @@ def create_sentiment_analysis_payload(df: pd.DataFrame) -> Dict[str, Any]:
         print(f"⚠️ Gagal menyimpan CSV: {e}")
 
     total = len(df)
-    positive = int((df['sentiment'] == 'Positive').sum())
-    negative = int((df['sentiment'] == 'Negative').sum())
-    neutral = int((df['sentiment'] == 'Neutral').sum())
-
     sentiment_counts = {
-        'positive': positive,
-        'negative': negative,
-        'neutral': neutral,
+        'positive': int((df['sentiment'] == 'Positive').sum()),
+        'negative': int((df['sentiment'] == 'Negative').sum()),
+        'neutral': int((df['sentiment'] == 'Neutral').sum()),
     }
 
     executive_summary = ""
     print("🤖 Using local IndoBERT for summary generation...")
     executive_summary = generate_indobert_summary(df)
-    
     if not executive_summary:
         print("📊 Fallback to local extractive NLP...")
         executive_summary = generate_extractive_summary(df, all_stopwords)
@@ -469,12 +474,11 @@ def create_sentiment_analysis_payload(df: pd.DataFrame) -> Dict[str, Any]:
             'message': str(row.get('message', '')),
             'sentiment': str(row.get('sentiment', 'Neutral')),
             'emotion': str(row.get('emotion', 'Neutral')),
+            'confidence': float(row.get('confidence', 0.0))
         })
 
     emotion_counts = Counter(df['emotion'])
-    emotion_distribution = []
-    for label in ['Neutral', 'Excitement', 'Annoyance', 'Sadness']:
-        emotion_distribution.append({'label': label, 'value': int(emotion_counts.get(label, 0))})
+    emotion_distribution = [{'label': label, 'value': int(emotion_counts.get(label, 0))} for label in ['Neutral', 'Excitement', 'Annoyance', 'Sadness']]
 
     try:
         trend_df = df.copy()
@@ -482,18 +486,12 @@ def create_sentiment_analysis_payload(df: pd.DataFrame) -> Dict[str, Any]:
         trend_df = trend_df.sort_values('time').reset_index(drop=True)
         trend_df['chunk'] = pd.qcut(np.arange(len(trend_df)), q=10, labels=False, duplicates='drop')
         grouped = trend_df.groupby(['chunk', 'sentiment']).size().unstack(fill_value=0).reset_index()
-        
         for col in ['Positive', 'Negative', 'Neutral']:
-            if col not in grouped.columns:
-                grouped[col] = 0
-                
+            if col not in grouped.columns: grouped[col] = 0
         trend_data = []
         for idx, row in grouped.iterrows():
             trend_data.append({
-                'time': f"Fase {int(row['chunk']) + 1}",
-                'Positive': int(row['Positive']),
-                'Negative': int(row['Negative']),
-                'Neutral': int(row['Neutral'])
+                'time': f"Fase {int(row['chunk']) + 1}", 'Positive': int(row['Positive']), 'Negative': int(row['Negative']), 'Neutral': int(row['Neutral'])
             })
     except Exception as e:
         print(f"Error memproses trend data: {e}")
@@ -515,36 +513,38 @@ def create_sentiment_analysis_payload_fast(df: pd.DataFrame) -> Dict[str, Any]:
 
     sentiments = []
     emotions = []
+    confidences = []
     for msg in df['message']:
-        sentiment = classify_sentiment_rule_based(msg)
+        sentiment, score = classify_sentiment_rule_based(msg)
         emotion = infer_sentiment_emotion(msg, sentiment)
         sentiments.append(sentiment)
         emotions.append(emotion)
+        confidences.append(round(score * 100, 2))
 
     df['sentiment'] = sentiments
     df['emotion'] = emotions
+    df['confidence'] = confidences
 
     all_stopwords = set()
-    try:
-        all_stopwords.update(stopwords.words('english'))
-    except Exception:
-        pass
+    try: all_stopwords.update(stopwords.words('english'))
+    except Exception: pass
+    
     all_stopwords.update({
         'yg', 'di', 'ke', 'dari', 'ini', 'itu', 'dan', 'atau', 'tapi', 'yang', 'buat', 'sama', 'kok', 'sih', 'nya', 'aja', 'kalo',
-        'udah', 'gak', 'ga', 'ada', 'untuk', 'dengan', 'dalam', 'pada', 'juga', 'sudah', 'saya', 'dia', 'mereka', 'kita', 'kami',
-        'kamu', 'aku', 'bisa', 'tidak', 'ya', 'yaudah', 'saja', 'belum', 'kalau', 'jadi', 'lagi', 'terus', 'biar', 'pas', 'kan',
+        'udah', 'ada', 'untuk', 'dengan', 'dalam', 'pada', 'juga', 'sudah', 'saya', 'dia', 'mereka', 'kita', 'kami',
+        'kamu', 'aku', 'bisa', 'ya', 'yaudah', 'saja', 'kalau', 'jadi', 'lagi', 'terus', 'biar', 'pas', 'kan',
         'lebih', 'paling', 'baru', 'sekarang', 'banyak', 'sangat', 'sekali', 'memang', 'pasti', 'karena', 'seperti', 'apa', 'siapa',
         'bagaimana', 'kenapa', 'kapan', 'dimana', 'mana', 'dong', 'deh', 'lah', 'pun', 'gini', 'gitu', 'begini', 'begitu',
         'mah', 'nah', 'loh', 'nih', 'tuh', 'eh', 'oh', 'ah', 'ih', 'uh', 'bgt', 'banget', 'gw', 'gua', 'lu', 'lo', 'emang',
-        'dgn', 'klo', 'karna', 'krn', 'jd', 'jgn', 'jangan', 'bkn', 'bukan', 'bs', 'tp', 'dpt', 'dapet', 'org', 'orang', 'gk', 'tetap'
+        'dgn', 'klo', 'karna', 'krn', 'jd', 'bs', 'tp', 'dpt', 'dapet', 'org', 'orang', 'tetap'
     })
 
     total = len(df)
-    positive = int((df['sentiment'] == 'Positive').sum())
-    negative = int((df['sentiment'] == 'Negative').sum())
-    neutral = int((df['sentiment'] == 'Neutral').sum())
-
-    sentiment_counts = {'positive': positive, 'negative': negative, 'neutral': neutral}
+    sentiment_counts = {
+        'positive': int((df['sentiment'] == 'Positive').sum()),
+        'negative': int((df['sentiment'] == 'Negative').sum()),
+        'neutral': int((df['sentiment'] == 'Neutral').sum())
+    }
     executive_summary = generate_extractive_summary(df, all_stopwords)
 
     raw_feedback = []
@@ -555,12 +555,11 @@ def create_sentiment_analysis_payload_fast(df: pd.DataFrame) -> Dict[str, Any]:
             'message': str(row.get('message', '')),
             'sentiment': str(row.get('sentiment', 'Neutral')),
             'emotion': str(row.get('emotion', 'Neutral')),
+            'confidence': float(row.get('confidence', 0.0))
         })
 
     emotion_counts = Counter(df['emotion'])
-    emotion_distribution = []
-    for label in ['Neutral', 'Excitement', 'Annoyance', 'Sadness']:
-        emotion_distribution.append({'label': label, 'value': int(emotion_counts.get(label, 0))})
+    emotion_distribution = [{'label': label, 'value': int(emotion_counts.get(label, 0))} for label in ['Neutral', 'Excitement', 'Annoyance', 'Sadness']]
 
     try:
         trend_df = df.copy()
@@ -569,15 +568,11 @@ def create_sentiment_analysis_payload_fast(df: pd.DataFrame) -> Dict[str, Any]:
         trend_df['chunk'] = pd.qcut(np.arange(len(trend_df)), q=10, labels=False, duplicates='drop')
         grouped = trend_df.groupby(['chunk', 'sentiment']).size().unstack(fill_value=0).reset_index()
         for col in ['Positive', 'Negative', 'Neutral']:
-            if col not in grouped.columns:
-                grouped[col] = 0
+            if col not in grouped.columns: grouped[col] = 0
         trend_data = []
         for _, row in grouped.iterrows():
             trend_data.append({
-                'time': f"Fase {int(row['chunk']) + 1}",
-                'Positive': int(row['Positive']),
-                'Negative': int(row['Negative']),
-                'Neutral': int(row['Neutral'])
+                'time': f"Fase {int(row['chunk']) + 1}", 'Positive': int(row['Positive']), 'Negative': int(row['Negative']), 'Neutral': int(row['Neutral'])
             })
     except Exception:
         trend_data = []
@@ -597,23 +592,14 @@ def load_local_sentiment_source(max_rows: int = 1500) -> pd.DataFrame:
         CHAT_DATA_PATH,
         PROJECT_ROOT / "artifacts" / "nlp" / "gadgetin_1500_comments_analyzed.csv",
     ]
-
     for path in candidate_paths:
-        if not path.exists():
-            continue
-
+        if not path.exists(): continue
         df = pd.read_csv(path).copy()
         if "message" not in df.columns:
-            if "text" in df.columns:
-                df = df.rename(columns={"text": "message"})
-            else:
-                continue
-
-        if "time" not in df.columns:
-            df["time"] = pd.Timestamp.now().isoformat()
-        if "author" not in df.columns:
-            df["author"] = "LocalCache"
-
+            if "text" in df.columns: df = df.rename(columns={"text": "message"})
+            else: continue
+        if "time" not in df.columns: df["time"] = pd.Timestamp.now().isoformat()
+        if "author" not in df.columns: df["author"] = "LocalCache"
         return df.loc[:, [c for c in ["time", "author", "message"] if c in df.columns]].head(max_rows)
 
     fallback_rows = [
@@ -713,11 +699,21 @@ def build_probability_distribution(plan_df: pd.DataFrame, bins: int = 10) -> Dic
     return {"bins": labels, "counts": [int(value) for value in counts]}
 
 def build_feature_dominance(plan_df: pd.DataFrame) -> List[Dict[str, Any]]:
-    feature_order = ["nps_trend", "is_on_time_sum", "feature_adoption_pct_mean", "churned", "ensemble_prediction", "cat_proba", "xgb_proba", "ensemble_proba", "actual"]
-    available = [column for column in feature_order if column in plan_df.columns]
-    if not available: return []
-    correlations = plan_df[available].corrwith(plan_df["actual"]).abs().sort_values()
-    return [{"label": label, "value": round(safe_float(correlations[label]), 4)} for label in correlations.index]
+    valid_features = [
+        "payment_delay_days_mean", "days_since_last_login", "avg_nps_score", "total_tickets",
+        "feature_adoption_pct_mean", "avg_monthly_usage_hours", "payment_health_score",
+        "critical_ticket_ratio", "unresolved_ratio", "dunning_event_count", "revenue_at_risk",
+        "is_on_time_sum", "nps_trend", "tenure_months"
+    ]
+    available = [col for col in valid_features if col in plan_df.columns]
+    if not available or "actual" not in plan_df.columns: return []
+    correlations = plan_df[available].corrwith(plan_df["actual"]).abs().sort_values(ascending=True).dropna()
+    top_correlations = correlations.tail(7)
+    
+    result = []
+    for label in top_correlations.index:
+        result.append({"label": str(label), "value": round(safe_float(top_correlations[label]), 4)})
+    return result
 
 def build_revenue_at_risk(plan_df: pd.DataFrame) -> Dict[str, Any]:
     working = plan_df.copy()
@@ -790,16 +786,13 @@ def build_dashboard_customer_churn(limit_per_status: int = 10) -> List[Dict[str,
     combined["status"] = np.where(combined["actual"] == 1, "Churned", "Not Churned")
     combined["type"] = combined["plan_type"].astype(str) + "/" + combined["contract_type"].astype(str)
     
-    # Gunakan safe_float agar map tidak error saat menemui NAType
     combined["score"] = combined["ensemble_proba"].map(lambda v: f"{safe_float(v):.3f}")
     
     df_export = combined.loc[:, ["customer_id", "type", "score", "status"]].rename(columns={"customer_id": "id"})
     
-    # 1. Bersihkan nilai NA/NaN agar tidak memicu error NAType / ValueError dari Pydantic
     df_export = df_export.fillna("")
     records = df_export.to_dict(orient="records")
     
-    # 2. Paksa konversi semua kunci dictionary menjadi string
     return [{str(k): v for k, v in record.items()} for record in records]
 
 def get_plan_summary() -> Dict[str, Any]:
@@ -888,14 +881,52 @@ def api_churn_analysis(plan_type: Optional[str] = None) -> Dict[str, Any]:
 def api_dashboard_summary() -> Dict[str, Any]:
     engine = load_engineered_df()
     predictions = load_prediction_results()
+    
+    # 1. Mendapatkan stats untuk graph dan card metrik utama (ML)
     summary_stats = build_dashboard_summary_stats(engine, predictions)
+    
+    # 2. Tabel Customer Churn menggunakan data ML
     customer_churn = build_dashboard_customer_churn(limit_per_status=10)
-    feedback_data = [
-        {"id": "C-0267", "text": "UI responsif, prediksi sangat akurat.", "nps": 9, "sentiment": "Positive"},
-        {"id": "C-0091", "text": "Performa lambat saat muat dataset.", "nps": 5, "sentiment": "Negative"},
-        {"id": "C-0176", "text": "Analisis sentimen NLP luar biasa!", "nps": 8, "sentiment": "Positive"},
-    ]
-    return {"summaryStats": summary_stats, "customerChurnData": customer_churn, "totalCustomers": int(len(engine)), "feedbackData": feedback_data, "plans": get_plan_summary()["plans"]}
+    
+    # 3. Tabel Customer Feedback menggunakan data NLP (menarik CSV NLP lokal hasil scraping)
+    nlp_path = PROJECT_ROOT / "artifacts" / "nlp" / "gadgetin_1500_comments_analyzed.csv"
+    feedback_data = []
+    try:
+        if nlp_path.exists():
+            df_nlp = pd.read_csv(nlp_path)
+            # Ambil sampel komentar untuk dashboard (Prioritaskan yg Negative agar variatif)
+            df_neg = df_nlp[df_nlp['sentiment'] == 'Negative'].head(5)
+            df_pos = df_nlp[df_nlp['sentiment'] == 'Positive'].head(5)
+            df_mixed = pd.concat([df_neg, df_pos]).sample(frac=1).reset_index(drop=True) # Acak urutan
+            
+            for idx, row in df_mixed.iterrows():
+                sentiment = str(row.get('sentiment', 'Neutral'))
+                nps_score = 9 if sentiment == 'Positive' else (4 if sentiment == 'Negative' else 7)
+                author = str(row.get('author', f"User-{idx}")).replace('@', '')[:10]
+                feedback_data.append({
+                    "id": f"YT-{author}",
+                    "text": str(row.get('message', ''))[:80] + "...",
+                    "nps": nps_score,
+                    "sentiment": sentiment
+                })
+    except Exception as e:
+        print(f"Error loading NLP data for dashboard: {e}")
+        
+    # Fallback jika file NLP belum di-generate
+    if not feedback_data:
+        feedback_data = [
+            {"id": "YT-dellyapingg", "text": "Opening kebesaran bang, kurang suka.", "nps": 4, "sentiment": "Negative"},
+            {"id": "YT-ainyapipi", "text": "Bagus banget penjelasannya, sangat mantap!", "nps": 9, "sentiment": "Positive"},
+            {"id": "YT-terminol", "text": "Harganya kemahalan sih ini jujur.", "nps": 5, "sentiment": "Negative"},
+        ]
+    
+    return {
+        "summaryStats": summary_stats, 
+        "customerChurnData": customer_churn, 
+        "totalCustomers": int(len(engine)), 
+        "feedbackData": feedback_data, 
+        "plans": get_plan_summary()["plans"]
+    }
 
 @app.get("/api/customer/{customer_id}/features")
 def api_customer_features(customer_id: str, plan_type: Optional[str] = None) -> Dict[str, Any]:
@@ -956,7 +987,7 @@ def api_sentiment_analysis() -> Dict[str, Any]:
     try:
         if YOUTUBE_API_KEY:
             video_id = "MBRtCiE7-v8"
-            max_comments = 1500 # FIX: Diubah menjadi 1500 tepat
+            max_comments = 1500 
             raw_comments = scrape_youtube_comments(video_id, max_comments)
             if not raw_comments:
                 raise HTTPException(status_code=400, detail="Gagal mengambil komentar dari YouTube.")
@@ -965,7 +996,7 @@ def api_sentiment_analysis() -> Dict[str, Any]:
             payload["data_source"] = "youtube_api"
             return payload
         else:
-            df = load_local_sentiment_source(max_rows=1500) # FIX: Diubah menjadi 1500 tepat
+            df = load_local_sentiment_source(max_rows=1500) 
             if df.empty:
                 raise HTTPException(status_code=400, detail="Tidak ada data sentimen lokal yang tersedia.")
             payload = create_sentiment_analysis_payload_fast(df)
@@ -980,7 +1011,6 @@ def api_sentiment_analysis() -> Dict[str, Any]:
 
 @app.get("/api/sentiment/export")
 def api_sentiment_export():
-    # FIX: Export filename matching the 1500 limit
     file_path = NLP_ARTIFACTS_DIR / "gadgetin_1500_comments_analyzed.csv"
     if file_path.exists():
         return FileResponse(path=file_path, filename="gadgetin_1500_comments_analyzed.csv", media_type="text/csv")
@@ -990,12 +1020,18 @@ def api_sentiment_export():
 def api_sentiment_manual(payload: ManualSentimentRequest) -> Dict[str, Any]:
     try:
         indobert, all_stopwords = get_nlp_components()
-        sentiment = classify_sentiment(payload.text, indobert, all_stopwords)
+        sentiment, score = classify_sentiment(payload.text, indobert, all_stopwords)
         emotion = infer_sentiment_emotion(payload.text, sentiment)
+        
+        # XAI terpasang untuk UI Sentimen Manual
+        xai_explanation = explain_sentiment_xai(payload.text)
+        
         return {
             "text": payload.text,
             "sentiment": sentiment,
+            "confidence": round(score * 100, 2),
             "emotion": emotion,
+            "xai": xai_explanation
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Gagal menganalisis teks manual: {str(exc)}")

@@ -1,20 +1,22 @@
 import logging
 from typing import Dict, Optional
-from datetime import datetime, timedelta
 import pandas as pd
-from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM
-from nlp_config import SUMMARIZATION_MODEL_NAME, DEVICE, ENABLE_CACHING, NLP_CACHE_DIR, CACHE_EXPIRY_HOURS
+# Menghapus 'pipeline' karena tidak dipakai
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+from nlp_config import SUMMARIZATION_MODEL_NAME, DEVICE, ENABLE_CACHING
 
-# Mendefinisikan class dummy SummarizationCache agar tidak undefined
+# Saya ubah Dummy cache menjadi in-memory cache sederhana agar benar-benar berfungsi
 class SummarizationCache:
+    def __init__(self):
+        self._cache = {}
+
     def get(self, text: str) -> Optional[str]:
-        return None
+        return self._cache.get(text)
         
     def set(self, text: str, summary: str):
-        pass
+        self._cache[text] = summary
 
 logging.basicConfig(level=logging.INFO)
-# Mendefinisikan logger yang tadinya undefined
 logger = logging.getLogger(__name__)
 
 class IndoBERTSummarizationEngine:
@@ -22,15 +24,23 @@ class IndoBERTSummarizationEngine:
         self.use_cache = ENABLE_CACHING
         self.cache = SummarizationCache() if self.use_cache else None
         
+        # Inisialisasi awal dengan None untuk mencegah AttributeError jika gagal load
+        self.tokenizer = None
+        self.model = None
+        
         logger.info(f"Loading local summarization model: {SUMMARIZATION_MODEL_NAME}...")
         try:
-            # Mengganti pipeline dengan pemanggilan arsitektur yang eksplisit
             self.tokenizer = AutoTokenizer.from_pretrained(SUMMARIZATION_MODEL_NAME)
             self.model = AutoModelForSeq2SeqLM.from_pretrained(SUMMARIZATION_MODEL_NAME).to(DEVICE)
+            logger.info("Summarization model loaded successfully.")
         except Exception as e:
             logger.error(f"❌ Failed to load summarizer: {e}")
 
     def summarize_text(self, text: str) -> str:
+        # Cek apakah model berhasil dimuat
+        if self.model is None or self.tokenizer is None:
+            return "Sistem gagal membuat ringkasan karena model tidak tersedia."
+
         if not text or not str(text).strip():
             return ""
             
@@ -40,7 +50,6 @@ class IndoBERTSummarizationEngine:
                 return cached
                 
         try:
-            # Proses text-to-summary secara manual
             inputs = self.tokenizer(text, return_tensors="pt", max_length=512, truncation=True).to(DEVICE)
             
             outputs = self.model.generate(
@@ -67,17 +76,25 @@ class IndoBERTSummarizationEngine:
         if comments_df is None or comments_df.empty:
             return {"Error": "Dataframe is empty or None"}
 
-        if 'sentiment' not in comments_df.columns or 'comment' not in comments_df.columns:
-            msg_col = 'message' if 'message' in comments_df.columns else 'comment'
-            if msg_col not in comments_df.columns: 
-                return {"Error": "Dataframe missing required columns"}
-        else:
-            msg_col = 'comment'
+        # PERBAIKAN LOGIKA: Wajib cek kolom 'sentiment' dulu, jika tidak ada, proses tidak bisa dilanjut
+        if 'sentiment' not in comments_df.columns:
+            return {"Error": "Dataframe missing required 'sentiment' column"}
+
+        # Penentuan kolom pesan
+        msg_col = 'comment'
+        if 'comment' not in comments_df.columns:
+            if 'message' in comments_df.columns:
+                msg_col = 'message'
+            else:
+                return {"Error": "Dataframe missing required message/comment columns"}
 
         for sentiment in ['Positive', 'Negative', 'Neutral']:
             texts = comments_df[comments_df['sentiment'] == sentiment][msg_col].dropna().astype(str).tolist()
             if texts:
-                combined_text = " . ".join(texts[:30])
+                # PERBAIKAN: Mengurangi dari 30 menjadi 15 komentar
+                # Alasan: Batas token model umumnya 512. Jika 30 komentar digabung, kemungkinan besar token akan terpotong (truncated)
+                # sehingga komentar di urutan belakang tidak ikut diringkas.
+                combined_text = " . ".join(texts[:15]) 
                 summary = self.summarize_text(combined_text)
                 results[sentiment] = summary if summary else "Tidak ada ringkasan."
             else:

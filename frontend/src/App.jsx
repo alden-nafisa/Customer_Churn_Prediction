@@ -1,21 +1,64 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import LoginPage from './components/LoginPage'
 import DashboardView from './components/DashboardView'
 import PredictionView from './components/PredictionViewIntegrated'
 import SentimentView from './components/SentimentView'
 import { BarChart3, LayoutDashboard, MessageSquare, HelpCircle, Target } from 'lucide-react'
-import {
-  dashboardHighRiskAlerts,
-  predictionLogs,
-  predictionHighRiskAlerts,
-  sentimentLogs,
-  sentimentHighRiskAlerts,
-} from './components/MockData.jsx'
+
+// Membutuhkan URL Backend
+const API_BASE_URL = 'http://127.0.0.1:8000'
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [activeTab, setActiveTab] = useState('prediction')
   const [isHelpOpen, setIsHelpOpen] = useState(false)
+
+  // State untuk Data Log & Alert Dinamis (Dari CSV / API)
+  const [dynamicLogs, setDynamicLogs] = useState([])
+  const [dynamicAlerts, setDynamicAlerts] = useState([])
+
+  // Fungsi Fetch untuk mendapatkan data dari Dashboard Summary API
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetch(`${API_BASE_URL}/api/dashboard/summary`)
+        .then(res => res.json())
+        .then(data => {
+          // 1. Mengekstrak ML Alerts dari Customer Churn CSV (Hanya yang probabilitasnya > 0.6)
+          const churnAlerts = (data.customerChurnData || [])
+            .filter(c => parseFloat(c.score) > 0.6)
+            .slice(0, 3)
+            .map(c => ({
+              time: 'Recent',
+              id: c.id,
+              type: c.type,
+              desc: `Ensemble probability (Churn) reached ${(parseFloat(c.score)*100).toFixed(1)}%`,
+              riskLevel: parseFloat(c.score) > 0.8 ? 'high' : 'warning'
+            }));
+
+          // 2. Mengekstrak NLP Alerts dari Customer Feedback CSV (Hanya sentimen Negatif)
+          const nlpAlerts = (data.feedbackData || [])
+            .filter(f => f.sentiment === 'Negative')
+            .slice(0, 2)
+            .map(f => ({
+              time: 'Recent',
+              id: f.id,
+              type: 'Negative Feedback',
+              desc: `Keluhan: "${f.text}"`,
+              riskLevel: 'high'
+            }));
+
+          // Set alerts dengan penggabungan data CSV ML & NLP
+          setDynamicAlerts([...churnAlerts, ...nlpAlerts]);
+
+          // Set logs statis (sebagai info pipeline)
+          setDynamicLogs([
+            { icon: <Target size={14} className="text-indigo-500" />, title: 'ML Pipeline', time: 'Active', desc: 'Dataset Churn CSV Sync Completed' },
+            { icon: <MessageSquare size={14} className="text-emerald-500" />, title: 'NLP IndoBERT', time: 'Active', desc: 'Dataset Sentiment CSV Connected' }
+          ]);
+        })
+        .catch(err => console.error("Gagal menarik data untuk Alert Sidebar:", err));
+    }
+  }, [isAuthenticated]);
 
   if (!isAuthenticated) {
     return <LoginPage onLogin={() => {
@@ -25,110 +68,32 @@ export default function App() {
   }
 
   const renderSidebarContent = () => {
-    if (activeTab === 'sentiment') {
-      return (
-        <>
-          <div className="mb-10">
-            <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-wider mb-4 text-center">Log System & ML</h3>
-            <div className="space-y-3">
-              {sentimentLogs.map((log, i) => (
-                <div key={i} className="bg-slate-50 rounded-xl p-3 flex gap-3 border border-slate-100 hover:border-slate-200 transition-colors">
-                  <div className="w-8 h-8 rounded-full bg-white shadow-sm flex items-center justify-center flex-shrink-0 border border-slate-100">{log.icon}</div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex justify-between items-start mb-0.5"><h4 className="text-[11px] font-bold text-slate-800">{log.title}</h4><span className="text-[9px] font-semibold text-slate-400 whitespace-nowrap ml-2">{log.time}</span></div>
-                    <p className="text-[10px] text-slate-500 leading-snug">{log.desc}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-wider">HIGH-RISK ALERT</h3>
-              <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></span>
-            </div>
-            <div className="space-y-3">
-              {sentimentHighRiskAlerts.map((alert, idx) => {
-                let colors = { border: 'bg-rose-500', text: 'text-rose-500', badgeBg: 'bg-rose-500', badgeText: 'HIGH RISK' }
-                if (alert.riskLevel === 'warning') colors = { border: 'bg-amber-500', text: 'text-amber-500', badgeBg: 'bg-amber-500', badgeText: 'WARNING' }
-
-                return (
-                  <div key={idx} className="bg-white rounded-xl p-3 border border-slate-100 shadow-sm relative overflow-hidden group">
-                    <div className={`absolute left-0 top-0 bottom-0 w-[3px] ${colors.border}`}></div>
-                    <div className="flex justify-between items-center mb-1 pl-2">
-                      <span className={`text-[9px] font-bold ${colors.text} tracking-wider uppercase`}>{alert.time}</span>
-                      <span className={`text-[8px] font-black text-white ${colors.badgeBg} px-1.5 py-0.5 rounded shadow-sm`}>{colors.badgeText}</span>
-                    </div>
-                    <div className="pl-2"><h4 className="text-[11px] font-bold text-slate-800">{alert.id}</h4><p className="text-[10px] text-slate-500 mt-1 leading-snug">{alert.desc}</p></div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        </>
-      )
-    }
-
-    if (activeTab === 'prediction') {
-      return (
-        <>
-          <div className="mb-10">
-            <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-wider mb-4 text-center">Log System & ML</h3>
-            <div className="space-y-3">
-              {predictionLogs.map((log, i) => (
-                <div key={i} className="bg-slate-50 rounded-xl p-3 flex gap-3 border border-slate-100 hover:border-slate-200 transition-colors">
-                  <div className="w-8 h-8 rounded-full bg-white shadow-sm flex items-center justify-center flex-shrink-0 border border-slate-100">{log.icon}</div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex justify-between items-start mb-0.5"><h4 className="text-[11px] font-bold text-slate-800">{log.title}</h4><span className="text-[9px] font-semibold text-slate-400 whitespace-nowrap ml-2">{log.time}</span></div>
-                    <p className="text-[10px] text-slate-500 leading-snug">{log.desc}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-wider">HIGH-RISK ALERT</h3>
-              <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></span>
-            </div>
-            <div className="space-y-3">
-              {predictionHighRiskAlerts.map((alert, idx) => {
-                let colors = { border: 'bg-rose-500', text: 'text-rose-500', badgeBg: 'bg-rose-500', badgeText: 'HIGH RISK' }
-                if (alert.riskLevel === 'warning') colors = { border: 'bg-amber-500', text: 'text-amber-500', badgeBg: 'bg-amber-500', badgeText: 'WARNING' }
-                if (alert.riskLevel === 'safe') colors = { border: 'bg-emerald-500', text: 'text-emerald-500', badgeBg: 'bg-emerald-500', badgeText: 'SAFE' }
-
-                return (
-                  <div key={idx} className="bg-white rounded-xl p-3 border border-slate-100 shadow-sm relative overflow-hidden group">
-                    <div className={`absolute left-0 top-0 bottom-0 w-[3px] ${colors.border}`}></div>
-                    <div className="flex justify-between items-center mb-1 pl-2">
-                      <span className={`text-[9px] font-bold ${colors.text} tracking-wider uppercase`}>{alert.time}</span>
-                      <span className={`text-[8px] font-black text-white ${colors.badgeBg} px-1.5 py-0.5 rounded shadow-sm`}>{colors.badgeText}</span>
-                    </div>
-                    <div className="pl-2">
-                      <h4 className="text-[11px] font-bold text-slate-800">{alert.id} <span className="text-[9px] font-semibold text-slate-400">({alert.type})</span></h4>
-                      <p className="text-[10px] text-slate-500 mt-1 leading-snug">{alert.desc}</p>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        </>
-      )
-    }
-
+    // Menyederhanakan konten sidebar agar semua Tab mengambil data dinamis dari Backend
     return (
       <>
+        <div className="mb-10">
+          <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-wider mb-4 text-center">Log System & ML</h3>
+          <div className="space-y-3">
+            {dynamicLogs.map((log, i) => (
+              <div key={i} className="bg-slate-50 rounded-xl p-3 flex gap-3 border border-slate-100 hover:border-slate-200 transition-colors">
+                <div className="w-8 h-8 rounded-full bg-white shadow-sm flex items-center justify-center flex-shrink-0 border border-slate-100">{log.icon}</div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex justify-between items-start mb-0.5"><h4 className="text-[11px] font-bold text-slate-800">{log.title}</h4><span className="text-[9px] font-semibold text-slate-400 whitespace-nowrap ml-2">{log.time}</span></div>
+                  <p className="text-[10px] text-slate-500 leading-snug">{log.desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
         <div>
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-wider">HIGH-RISK ALERT</h3>
             <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></span>
           </div>
           <div className="space-y-3">
-            {dashboardHighRiskAlerts.map((alert, idx) => {
+            {dynamicAlerts.length > 0 ? dynamicAlerts.map((alert, idx) => {
               let colors = { border: 'bg-rose-500', text: 'text-rose-500', badgeBg: 'bg-rose-500', badgeText: 'HIGH RISK' }
               if (alert.riskLevel === 'warning') colors = { border: 'bg-amber-500', text: 'text-amber-500', badgeBg: 'bg-amber-500', badgeText: 'WARNING' }
-              if (alert.riskLevel === 'safe') colors = { border: 'bg-emerald-500', text: 'text-emerald-500', badgeBg: 'bg-emerald-500', badgeText: 'SAFE' }
 
               return (
                 <div key={idx} className="bg-white rounded-xl p-3 border border-slate-100 shadow-sm relative overflow-hidden group">
@@ -143,7 +108,9 @@ export default function App() {
                   </div>
                 </div>
               )
-            })}
+            }) : (
+              <div className="text-[10px] text-slate-400 font-bold p-3 text-center border border-dashed rounded-xl border-slate-200">Menunggu Data Risiko Tinggi dari CSV...</div>
+            )}
           </div>
         </div>
       </>
