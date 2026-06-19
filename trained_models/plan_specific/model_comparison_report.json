@@ -5,9 +5,9 @@
       "precision": 0.5634920634920635,
       "recall": 0.8987341772151899,
       "f1": 0.6926829268292682,
-      "roc_auc": 0.8786380855585327,
-      "pr_auc": 0.5817754103917222,
-      "brier_score": 0.13059987127780914,
+      "roc_auc": 0.8785918876466784,
+      "pr_auc": 0.584315707663812,
+      "brier_score": 0.13057655096054077,
       "specificity": 0.7992700729927007,
       "sensitivity": 0.8987341772151899
     },
@@ -25,43 +25,43 @@
     "top_10_features_xgb": [
       {
         "feature": "days_since_last_login",
-        "importance": 0.31726980209350586
+        "importance": 0.3153519034385681
       },
       {
         "feature": "mrr_current",
-        "importance": 0.066104955971241
-      },
-      {
-        "feature": "total_tickets",
-        "importance": 0.0608869269490242
-      },
-      {
-        "feature": "avg_nps_score",
-        "importance": 0.06064679101109505
+        "importance": 0.06505711376667023
       },
       {
         "feature": "payment_consistency_score",
-        "importance": 0.05642474442720413
+        "importance": 0.06316342204809189
       },
       {
-        "feature": "total_users",
-        "importance": 0.0525086410343647
+        "feature": "avg_nps_score",
+        "importance": 0.06081635132431984
+      },
+      {
+        "feature": "total_tickets",
+        "importance": 0.060186292976140976
       },
       {
         "feature": "usage_per_user",
-        "importance": 0.05165567249059677
-      },
-      {
-        "feature": "revenue_at_risk",
-        "importance": 0.05100778117775917
+        "importance": 0.05256868526339531
       },
       {
         "feature": "avg_monthly_usage_hours",
-        "importance": 0.04997152090072632
+        "importance": 0.0515793152153492
+      },
+      {
+        "feature": "feature_adoption_pct_mean",
+        "importance": 0.051054514944553375
+      },
+      {
+        "feature": "revenue_at_risk",
+        "importance": 0.05064532533288002
       },
       {
         "feature": "critical_ticket_ratio",
-        "importance": 0.049479007720947266
+        "importance": 0.050021957606077194
       }
     ],
     "top_10_features_cb": [
@@ -109,14 +109,14 @@
   },
   "Professional": {
     "xgboost_metrics": {
-      "accuracy": 0.8038585209003215,
-      "precision": 0.45054945054945056,
+      "accuracy": 0.8135048231511254,
+      "precision": 0.4659090909090909,
       "recall": 0.7884615384615384,
-      "f1": 0.5734265734265734,
-      "roc_auc": 0.8442233442233442,
-      "pr_auc": 0.45287376067145885,
-      "brier_score": 0.13511082530021667,
-      "specificity": 0.806949806949807,
+      "f1": 0.5857142857142857,
+      "roc_auc": 0.8473418473418473,
+      "pr_auc": 0.44180194503013837,
+      "brier_score": 0.13522662222385406,
+      "specificity": 0.8185328185328186,
       "sensitivity": 0.7884615384615384
     },
     "catboost_metrics": {
@@ -133,43 +133,43 @@
     "top_10_features_xgb": [
       {
         "feature": "days_since_last_login",
-        "importance": 0.2403944581747055
+        "importance": 0.24582630395889282
       },
       {
         "feature": "usage_per_user",
-        "importance": 0.06379823386669159
-      },
-      {
-        "feature": "total_users",
-        "importance": 0.0637073814868927
-      },
-      {
-        "feature": "tenure_days",
-        "importance": 0.06269306689500809
+        "importance": 0.06363311409950256
       },
       {
         "feature": "feature_adoption_pct_mean",
-        "importance": 0.06234310194849968
-      },
-      {
-        "feature": "revenue_at_risk",
-        "importance": 0.06079404056072235
-      },
-      {
-        "feature": "total_tickets",
-        "importance": 0.060430943965911865
-      },
-      {
-        "feature": "payment_consistency_score",
-        "importance": 0.060178764164447784
+        "importance": 0.06212347000837326
       },
       {
         "feature": "mrr_current",
-        "importance": 0.060130614787340164
+        "importance": 0.06165648251771927
+      },
+      {
+        "feature": "revenue_at_risk",
+        "importance": 0.06135233864188194
+      },
+      {
+        "feature": "tenure_days",
+        "importance": 0.060913048684597015
+      },
+      {
+        "feature": "total_users",
+        "importance": 0.06059049814939499
+      },
+      {
+        "feature": "total_tickets",
+        "importance": 0.060188718140125275
       },
       {
         "feature": "avg_monthly_usage_hours",
-        "importance": 0.05759298428893089
+        "importance": 0.05872320011258125
+      },
+      {
+        "feature": "payment_consistency_score",
+        "importance": 0.05848338082432747
       }
     ],
     "top_10_features_cb": [
@@ -217,14 +217,14 @@
   },
   "Enterprise": {
     "xgboost_metrics": {
-      "accuracy": 0.8277310924369747,
-      "precision": 0.46153846153846156,
+      "accuracy": 0.8487394957983193,
+      "precision": 0.5294117647058824,
       "recall": 0.47368421052631576,
-      "f1": 0.4675324675324675,
-      "roc_auc": 0.8405263157894737,
-      "pr_auc": 0.5188400042072658,
-      "brier_score": 0.11146565526723862,
-      "specificity": 0.895,
+      "f1": 0.5,
+      "roc_auc": 0.8455263157894737,
+      "pr_auc": 0.5438755521927338,
+      "brier_score": 0.10610496997833252,
+      "specificity": 0.92,
       "sensitivity": 0.47368421052631576
     },
     "catboost_metrics": {
@@ -241,43 +241,43 @@
     "top_10_features_xgb": [
       {
         "feature": "days_since_last_login",
-        "importance": 0.2000713050365448
+        "importance": 0.20871824026107788
       },
       {
         "feature": "revenue_at_risk",
-        "importance": 0.07068270444869995
+        "importance": 0.07108277082443237
       },
       {
         "feature": "enterprise_account_health",
-        "importance": 0.06895844638347626
-      },
-      {
-        "feature": "critical_ticket_ratio",
-        "importance": 0.06489694118499756
+        "importance": 0.070311039686203
       },
       {
         "feature": "total_tickets",
-        "importance": 0.06313198804855347
-      },
-      {
-        "feature": "mrr_current",
-        "importance": 0.06208587437868118
+        "importance": 0.06495669484138489
       },
       {
         "feature": "total_users",
-        "importance": 0.06079127639532089
+        "importance": 0.06421296298503876
       },
       {
-        "feature": "payment_consistency_score",
-        "importance": 0.05840105563402176
+        "feature": "mrr_current",
+        "importance": 0.06292111426591873
       },
       {
-        "feature": "tenure_days",
-        "importance": 0.05570489168167114
+        "feature": "critical_ticket_ratio",
+        "importance": 0.060965538024902344
       },
       {
         "feature": "unresolved_ratio",
-        "importance": 0.05439924821257591
+        "importance": 0.055815715342760086
+      },
+      {
+        "feature": "feature_adoption_pct_mean",
+        "importance": 0.05279618129134178
+      },
+      {
+        "feature": "tenure_days",
+        "importance": 0.052185237407684326
       }
     ],
     "top_10_features_cb": [

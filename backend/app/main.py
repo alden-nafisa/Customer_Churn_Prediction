@@ -58,6 +58,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    
 )
 
 # ========== LOAD ENV & LOCAL INDOBERT ==========
@@ -187,7 +188,7 @@ def load_models(plan_type: str) -> Dict[str, Any]:
 def get_nlp_components():
     print("Membaca model IndoBERT ke dalam memori...")
     indobert = pipeline(
-        "sentiment-analysis", 
+        "text-classification", 
         model="mdhugol/indonesia-bert-sentiment-classification",
         tokenizer="mdhugol/indonesia-bert-sentiment-classification"
     )

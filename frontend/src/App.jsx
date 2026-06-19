@@ -1,12 +1,57 @@
 import React, { useState, useEffect } from 'react'
-import LoginPage from './components/LoginPage'
-import DashboardView from './components/DashboardView'
-import PredictionView from './components/PredictionViewIntegrated'
-import SentimentView from './components/SentimentView'
 import { BarChart3, LayoutDashboard, MessageSquare, HelpCircle, Target } from 'lucide-react'
 
 // Membutuhkan URL Backend
 const API_BASE_URL = 'http://127.0.0.1:8000'
+
+// --- Inline Mock Components (Merged into single file to resolve import errors) ---
+const LoginPage = ({ onLogin }) => (
+  <div className="min-h-screen flex items-center justify-center bg-slate-50">
+    <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm border border-slate-100">
+      <div className="text-center mb-8">
+        <h1 className="text-3xl font-black text-slate-800 tracking-tight">Lapis<span className="text-indigo-600">AI</span></h1>
+        <p className="text-sm text-slate-500 mt-2 font-medium">Please sign in to continue</p>
+      </div>
+      <button 
+        onClick={onLogin} 
+        className="w-full bg-indigo-600 text-white py-3.5 rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-md shadow-indigo-200"
+      >
+        Sign In (Demo)
+      </button>
+    </div>
+  </div>
+);
+
+const DashboardView = ({ setActiveTab }) => (
+  <div className="p-8 bg-white rounded-2xl shadow-sm border border-slate-100 h-full flex flex-col items-center justify-center text-center">
+    <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center mb-4">
+      <BarChart3 size={32} className="text-indigo-600" />
+    </div>
+    <h2 className="text-2xl font-black text-slate-800 mb-2">Dashboard Overview</h2>
+    <p className="text-slate-500 max-w-md">Your primary business metrics and high-level charts will be displayed here.</p>
+  </div>
+);
+
+const PredictionView = () => (
+  <div className="p-8 bg-white rounded-2xl shadow-sm border border-slate-100 h-full flex flex-col items-center justify-center text-center">
+    <div className="w-16 h-16 bg-rose-50 rounded-2xl flex items-center justify-center mb-4">
+      <Target size={32} className="text-rose-500" />
+    </div>
+    <h2 className="text-2xl font-black text-slate-800 mb-2">Churn Prediction Engine</h2>
+    <p className="text-slate-500 max-w-md">The ML prediction interface for analyzing customer churn risk will be rendered here.</p>
+  </div>
+);
+
+const SentimentView = () => (
+  <div className="p-8 bg-white rounded-2xl shadow-sm border border-slate-100 h-full flex flex-col items-center justify-center text-center">
+    <div className="w-16 h-16 bg-emerald-50 rounded-2xl flex items-center justify-center mb-4">
+      <MessageSquare size={32} className="text-emerald-500" />
+    </div>
+    <h2 className="text-2xl font-black text-slate-800 mb-2">Feedback & Sentiment</h2>
+    <p className="text-slate-500 max-w-md">The NLP analysis interface for understanding customer feedback will be integrated here.</p>
+  </div>
+);
+// ----------------------------------------------------------------------------------
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
@@ -161,7 +206,7 @@ export default function App() {
         </div>
       </aside>
 
-      <aside className="w-[300px] bg-white border-r border-slate-200 h-screen overflow-y-auto flex flex-col z-10 flex-shrink-0 hidden md:flex">
+      <aside className="w-[300px] bg-white border-r border-slate-200 h-screen overflow-y-auto flex-col z-10 flex-shrink-0 hidden md:flex">
         <div className="p-6">
           <div className="flex items-center gap-2 mb-8">
             <h1 className="text-2xl font-black text-slate-800 tracking-tight">Lapis<span className="text-indigo-600">AI</span></h1>
@@ -176,7 +221,7 @@ export default function App() {
       </aside>
 
       <main className="flex-1 flex flex-col h-screen overflow-hidden relative">
-        <div className="flex-1 overflow-y-auto px-8 pt-8">
+        <div className="flex-1 overflow-y-auto px-8 pt-8 pb-8">
           {activeTab === 'dashboard' && <DashboardView setActiveTab={setActiveTab} />}
           {activeTab === 'prediction' && <PredictionView />}
           {activeTab === 'sentiment' && <SentimentView />}
